@@ -10,22 +10,22 @@ import { t, translate } from './i18n.js';
  */
 const CATEGORY_META = {
     // V1 · 服务端 10 类
-    chats:      { icon: 'comment',            colorVar: '--storage-cat-chats'      },
+    chats: { icon: 'comment',            colorVar: '--storage-cat-chats'      },
     characters: { icon: 'user',                colorVar: '--storage-cat-characters' },
-    worlds:     { icon: 'book',                colorVar: '--storage-cat-worlds'     },
-    images:     { icon: 'image',               colorVar: '--storage-cat-images'     },
-    attachments:{ icon: 'paperclip',           colorVar: '--storage-cat-attach'     },
-    presets:    { icon: 'sliders',             colorVar: '--storage-cat-presets'    },
+    worlds: { icon: 'book',                colorVar: '--storage-cat-worlds'     },
+    images: { icon: 'image',               colorVar: '--storage-cat-images'     },
+    attachments: { icon: 'paperclip',           colorVar: '--storage-cat-attach'     },
+    presets: { icon: 'sliders',             colorVar: '--storage-cat-presets'    },
     extensions: { icon: 'puzzle-piece',        colorVar: '--storage-cat-ext'        },
-    vectors:    { icon: 'brain',               colorVar: '--storage-cat-vectors'    },
-    backups:    { icon: 'clock-rotate-left',   colorVar: '--storage-cat-backups'    },
-    other:      { icon: 'box',                 colorVar: '--storage-cat-other'      },
+    vectors: { icon: 'brain',               colorVar: '--storage-cat-vectors'    },
+    backups: { icon: 'clock-rotate-left',   colorVar: '--storage-cat-backups'    },
+    other: { icon: 'box',                 colorVar: '--storage-cat-other'      },
     // V2 · 浏览器侧 5 类
-    localStorage:   { icon: 'hard-drive',  colorVar: '--storage-cat-localstorage'   },
+    localStorage: { icon: 'hard-drive',  colorVar: '--storage-cat-localstorage'   },
     sessionStorage: { icon: 'clock',       colorVar: '--storage-cat-sessionstorage' },
-    indexeddb:      { icon: 'database',    colorVar: '--storage-cat-indexeddb'      },
-    cachestorage:   { icon: 'layer-group', colorVar: '--storage-cat-cachestorage'   },
-    quota:          { icon: 'chart-pie',   colorVar: '--storage-cat-quota'          },
+    indexeddb: { icon: 'database',    colorVar: '--storage-cat-indexeddb'      },
+    cachestorage: { icon: 'layer-group', colorVar: '--storage-cat-cachestorage'   },
+    quota: { icon: 'chart-pie',   colorVar: '--storage-cat-quota'          },
 };
 
 /**
@@ -176,7 +176,7 @@ class StorageInspector {
     _renderStackedBar(resp) {
         const bar = this.container.querySelector('.storageInspectorStackedBar');
         bar.innerHTML = '';
-        const showSummary = resp.entries.some(e => e.canDrill);
+        const showSummary = !resp.isLeaf && resp.entries.some(e => e.canDrill);
         bar.classList.toggle('displayNone', !showSummary);
         if (!showSummary) return;
 
@@ -189,7 +189,7 @@ class StorageInspector {
             seg.style.background = this._colorFor(e);
             seg.title = `${translate(e.label)}: ${humanFileSize(e.sizeBytes)}`;
             seg.addEventListener('click', () => {
-                if (e.canDrill) this.navigateTo([...this.pathStack, e.key]);
+                if (!resp.isLeaf && e.canDrill) this.navigateTo([...this.pathStack, e.key]);
             });
             bar.appendChild(seg);
         }
@@ -198,7 +198,7 @@ class StorageInspector {
     _renderLegend(resp) {
         const legend = this.container.querySelector('.storageInspectorLegend');
         legend.innerHTML = '';
-        const showSummary = resp.entries.some(e => e.canDrill);
+        const showSummary = !resp.isLeaf && resp.entries.some(e => e.canDrill);
         legend.classList.toggle('displayNone', !showSummary);
         if (!showSummary) return;
 
@@ -257,14 +257,15 @@ class StorageInspector {
         const maxSize = Math.max(...resp.entries.map(e => e.sizeBytes ?? 0), 1);
 
         for (const e of resp.entries) {
-            list.appendChild(this._renderEntry(e, maxSize));
+            list.appendChild(this._renderEntry(e, maxSize, !resp.isLeaf));
         }
     }
 
-    _renderEntry(entry, maxSize) {
+    _renderEntry(entry, maxSize, allowDrill = true) {
         const row = document.createElement('div');
+        const canDrill = allowDrill && entry.canDrill;
         row.className = 'storageInspectorEntry';
-        if (entry.canDrill) row.classList.add('storageInspectorEntryDrillable');
+        if (canDrill) row.classList.add('storageInspectorEntryDrillable');
         if (entry.kind === 'sensitive-blob') row.classList.add('storageInspectorSensitiveBlob');
         row.dataset.kind = entry.kind;
         row.dataset.key = entry.key;
@@ -323,7 +324,7 @@ class StorageInspector {
             row.appendChild(del);
         }
 
-        if (entry.canDrill) {
+        if (canDrill) {
             const chev = document.createElement('span');
             chev.className = 'storageInspectorEntryChevron';
             const chevIcon = document.createElement('i');

@@ -9,15 +9,17 @@
 //      → .userStorageInspectorButton.
 //   2. Verify L1 shows the stacked bar + at least the categories that our
 //      fixture populates.
-//   3. Drill Chats → default_Seraphina → first chat file.
-//   4. Verify L4 shows metadata + messages + sidecars split rows.
-//   5. Click a breadcrumb crumb to walk back up.
+//   3. Verify leaf categories do not expose invalid deeper navigation.
+//   4. Drill Chats → default_Seraphina → first chat file.
+//   5. Verify L4 shows metadata + messages + sidecars split rows.
+//   6. Click a breadcrumb crumb to walk back up.
 //
 // Also captures three doc screenshots on the way — 01-self-l1.png,
 // 02-self-chats-drilldown.png, 03-self-chat-file.png — that live under
 // docs/public/images/storage-inspector/ so the user-facing docs can
 // reference them without a separate capture pass.
 
+import { promises as fsPromises } from 'node:fs';
 import { test, expect } from '@playwright/test';
 import { resolve } from 'node:path';
 import { startServer, tearDownServer } from '../_lib/server.js';
@@ -34,6 +36,13 @@ test.beforeAll(async () => {
         scenarioId: 'self-drilldown',
     });
     await seedFixtureUser(server.dataRoot, 'default-user');
+
+    // Extensions is a simple/leaf category: its L2 rows may be directories
+    // on disk, but the API intentionally does not support a deeper path.
+    // Seed one real extension directory to pin the UI contract.
+    const extensionDir = resolve(server.dataRoot, 'default-user', 'extensions', 'fixture-extension');
+    await fsPromises.mkdir(extensionDir, { recursive: true });
+    await fsPromises.writeFile(resolve(extensionDir, 'manifest.json'), JSON.stringify({ name: 'fixture-extension' }));
 });
 
 test.afterAll(async () => {
@@ -41,7 +50,7 @@ test.afterAll(async () => {
 });
 
 test.describe('Storage Inspector · self drill-down', () => {
-    test('drills L1 → chats → character → chat → back via breadcrumb', async ({ page }) => {
+    test('drills supported paths and blocks leaf-category over-drill', async ({ page }) => {
         await awaitMainUI(page, server.baseURL);
 
         // Open user-settings drawer, click Account (#account_button) to
@@ -72,16 +81,37 @@ test.describe('Storage Inspector · self drill-down', () => {
 
         // L1 · stacked bar has multiple segments; the entry list has all
         // the categories the fixture populated (chats + worlds + images +
-        // backups + vectors + other → at least 5 visible rows).
+        // backups + vectors + other + extensions → at least 5 visible rows).
         expect(await inspector.locator('.storageInspectorBarSegment').count()).toBeGreaterThanOrEqual(3);
         expect(await inspector.locator('.storageInspectorEntry').count()).toBeGreaterThanOrEqual(5);
         await expect(inspector.locator('.storageInspectorEntry[data-key="chats"]')).toBeVisible();
+        await expect(inspector.locator('.storageInspectorEntry[data-key="extensions"]')).toBeVisible();
 
         // Screenshot 01 — L1 view (stacked bar + entry list visible).
         await page.screenshot({
             path: resolve(SCREENSHOT_DIR, '01-self-l1.png'),
             fullPage: false,
         });
+
+        // Extensions is a leaf response. The backend's generic directory
+        // enumerator reports directory rows as canDrill=true, but isLeaf=true
+        // is the response-level authority: no summary drill UI, chevron, or
+        // click navigation should be exposed.
+        await inspector.locator('.storageInspectorEntry[data-key="extensions"]').click();
+        await inspector.locator('.storageInspectorLoading.displayNone').waitFor({ state: 'attached', timeout: 15_000 });
+        await expect(inspector.locator('.storageInspectorBreadcrumbCurrent')).toHaveText(/Extensions|扩展/);
+        await expect(inspector.locator('.storageInspectorStackedBar')).toHaveClass(/displayNone/);
+        await expect(inspector.locator('.storageInspectorLegend')).toHaveClass(/displayNone/);
+        const extensionRow = inspector.locator('.storageInspectorEntry[data-key="fixture-extension"]');
+        await expect(extensionRow).toBeVisible();
+        expect(await extensionRow.locator('.storageInspectorEntryChevron').count()).toBe(0);
+        expect(await extensionRow.evaluate(el => el.classList.contains('storageInspectorEntryDrillable'))).toBe(false);
+        await extensionRow.click();
+        await expect(inspector.locator('.storageInspectorError')).toHaveClass(/displayNone/);
+
+        // Return to root before exercising supported chat drill-down.
+        await inspector.locator('.storageInspectorBreadcrumbCrumb').first().click();
+        await inspector.locator('.storageInspectorLoading.displayNone').waitFor({ state: 'attached', timeout: 15_000 });
 
         // Drill into Chats.
         await inspector.locator('.storageInspectorEntry[data-key="chats"]').click();
