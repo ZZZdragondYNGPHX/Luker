@@ -51,8 +51,14 @@ const EXECUTION_MODE_LOCALE_ZH_CN = Object.freeze({
     'Legacy · Single-node Spec': 'Legacy · 单节点 Spec',
     'Choose who owns the workflow and who writes the final reply.': '选择谁负责流程，以及最终产物由谁写入正文。',
     'Convert to Flow quick single-node': '转换为 Flow 快速单节点',
+    'Quick single-node': '快速单节点',
     'Quick single-node (migrated from Legacy Single)': '快速单节点（迁移自旧版 Single）',
+    'Create Flow quick single-node preset': '创建 Flow 快速单节点预设',
     'Could not read orchestration settings; conversion was not performed.': '无法读取编排设置，未执行转换。',
+    'Could not create the Flow quick single-node preset.': '无法创建 Flow 快速单节点预设。',
+    'Could not write the Flow quick single-node preset.': '写入 Flow 快速单节点预设失败。',
+    'Could not save the Flow quick single-node preset.': '保存 Flow 快速单节点预设失败。',
+    'Created a Flow quick single-node preset.': '已创建 Flow 快速单节点预设。',
     'Could not create the Flow quick single-node preset; Legacy Single was left unchanged.': '无法创建 Flow 快速单节点预设，旧版 Single 保持不变。',
     'Could not write the Flow quick single-node preset; Legacy Single was left unchanged.': '写入 Flow 快速单节点预设失败，旧版 Single 保持不变。',
     'Could not save the Flow quick single-node preset; Legacy Single was left unchanged.': '保存 Flow 快速单节点预设失败，旧版 Single 保持不变。',
@@ -77,6 +83,12 @@ const EXECUTION_MODE_LOCALE_ZH_TW = Object.freeze({
     'Existing legacy configs keep running; new configs should use Flow with the quick single-node template.': '保留舊設定繼續運作；新設定請使用 Flow 的快速單節點範本。',
     'Choose who owns the workflow and who writes the final reply.': '選擇誰負責流程，以及最終產物由誰寫入正文。',
     'Convert to Flow quick single-node': '轉換為 Flow 快速單節點',
+    'Quick single-node': '快速單節點',
+    'Create Flow quick single-node preset': '建立 Flow 快速單節點預設',
+    'Could not create the Flow quick single-node preset.': '無法建立 Flow 快速單節點預設。',
+    'Could not write the Flow quick single-node preset.': '寫入 Flow 快速單節點預設失敗。',
+    'Could not save the Flow quick single-node preset.': '儲存 Flow 快速單節點預設失敗。',
+    'Created a Flow quick single-node preset.': '已建立 Flow 快速單節點預設。',
 });
 
 function registerExecutionModeLocaleData(context) {
@@ -91,7 +103,8 @@ function t(text) {
 }
 const MODE_SELECT_ID = 'luker_orch_execution_mode';
 const MODE_UI_ATTR = 'data-luker-orch-mode-ui';
-const QUICK_FLOW_PRESET_NAME = 'Quick single-node (migrated from Legacy Single)';
+const QUICK_FLOW_PRESET_NAME = 'Quick single-node';
+const LEGACY_QUICK_FLOW_PRESET_NAME = 'Quick single-node (migrated from Legacy Single)';
 
 function getContext() {
     try {
@@ -161,14 +174,15 @@ async function persistPresetScope(context, scope, avatar) {
     return Boolean(await persistOrchestratorCharacterExtension(context, characterIndex, nextExtension));
 }
 
-async function convertLegacySingleToFlow(select) {
+async function createQuickSingleNodeFlowPreset(select, { legacyConversion = false } = {}) {
     const context = getContext();
     const settings = getSettings(context);
     if (!context || !settings) {
         notify('error', t('Could not read orchestration settings; conversion was not performed.'));
         return false;
     }
-    if (String(settings.executionMode || '') !== ORCH_EXECUTION_MODE_SINGLE
+    if (legacyConversion
+        && String(settings.executionMode || '') !== ORCH_EXECUTION_MODE_SINGLE
         && settings.singleAgentModeEnabled !== true) {
         return false;
     }
@@ -180,19 +194,20 @@ async function convertLegacySingleToFlow(select) {
         avatar = '';
     }
 
+    const presetName = legacyConversion ? LEGACY_QUICK_FLOW_PRESET_NAME : QUICK_FLOW_PRESET_NAME;
     let options = { context, avatar };
     let previousActiveId = getActivePresetId(settings, ORCH_EXECUTION_MODE_SPEC, { scope, ...options });
     let presetId = createPreset(
         settings,
         ORCH_EXECUTION_MODE_SPEC,
         scope,
-        { name: t(QUICK_FLOW_PRESET_NAME) },
+        { name: t(presetName) },
         options,
     );
 
-    // A legacy Single configuration can exist without a character preset
-    // container. Falling back to global keeps conversion explicit and avoids
-    // creating a new character override behind the user's back.
+    // A card can be in a displayed character scope without owning a preset
+    // container yet. Do not synthesize a new character extension envelope
+    // from this UI helper; fall back to the existing global library instead.
     if (!presetId && scope === 'character') {
         scope = 'global';
         avatar = '';
@@ -202,12 +217,14 @@ async function convertLegacySingleToFlow(select) {
             settings,
             ORCH_EXECUTION_MODE_SPEC,
             scope,
-            { name: t(QUICK_FLOW_PRESET_NAME) },
+            { name: t(presetName) },
             options,
         );
     }
     if (!presetId) {
-        notify('error', t('Could not create the Flow quick single-node preset; Legacy Single was left unchanged.'));
+        notify('error', t(legacyConversion
+            ? 'Could not create the Flow quick single-node preset; Legacy Single was left unchanged.'
+            : 'Could not create the Flow quick single-node preset.'));
         return false;
     }
 
@@ -227,7 +244,9 @@ async function convertLegacySingleToFlow(select) {
         if (finalPreviousActiveId) {
             setActivePresetId(settings, ORCH_EXECUTION_MODE_SPEC, scope, finalPreviousActiveId, finalOptions);
         }
-        notify('error', t('Could not write the Flow quick single-node preset; Legacy Single was left unchanged.'));
+        notify('error', t(legacyConversion
+            ? 'Could not write the Flow quick single-node preset; Legacy Single was left unchanged.'
+            : 'Could not write the Flow quick single-node preset.'));
         return false;
     }
 
@@ -237,14 +256,25 @@ async function convertLegacySingleToFlow(select) {
         if (finalPreviousActiveId) {
             setActivePresetId(settings, ORCH_EXECUTION_MODE_SPEC, scope, finalPreviousActiveId, finalOptions);
         }
-        notify('error', t('Could not save the Flow quick single-node preset; Legacy Single was left unchanged.'));
+        notify('error', t(legacyConversion
+            ? 'Could not save the Flow quick single-node preset; Legacy Single was left unchanged.'
+            : 'Could not save the Flow quick single-node preset.'));
         return false;
     }
 
+    // Reuse the native select's existing main.js handler as the one source of
+    // truth for mode changes and workspace/preset refreshes. Dispatch even if
+    // the value was already spec so the newly-active preset is rendered.
     select.value = ORCH_EXECUTION_MODE_SPEC;
     select.dispatchEvent(new Event('change', { bubbles: true }));
-    notify('success', t('Converted to a Flow quick single-node preset. Legacy Single prompts were kept for compatibility.'));
+    notify('success', t(legacyConversion
+        ? 'Converted to a Flow quick single-node preset. Legacy Single prompts were kept for compatibility.'
+        : 'Created a Flow quick single-node preset.'));
     return true;
+}
+
+async function convertLegacySingleToFlow(select) {
+    return createQuickSingleNodeFlowPreset(select, { legacyConversion: true });
 }
 
 function modeCard(definition, selectedMode) {
@@ -275,6 +305,9 @@ function syncModeUi(select, host) {
         card.classList.toggle('is-active', active);
         card.setAttribute('aria-checked', active ? 'true' : 'false');
     });
+
+    const quickFlowAction = host.querySelector('.luker-orch-mode-quick-flow');
+    if (quickFlowAction) quickFlowAction.hidden = currentMode !== ORCH_EXECUTION_MODE_SPEC;
 
     let legacy = host.querySelector('.luker-orch-mode-legacy');
     if (currentMode !== ORCH_EXECUTION_MODE_SINGLE) {
@@ -343,6 +376,26 @@ function decorateModeSelect(select) {
     }
     host.appendChild(grid);
 
+    const actions = document.createElement('div');
+    actions.className = 'luker-orch-mode-actions';
+    const quickFlow = document.createElement('button');
+    quickFlow.type = 'button';
+    quickFlow.className = 'menu_button luker-orch-mode-quick-flow';
+    quickFlow.textContent = t('Create Flow quick single-node preset');
+    quickFlow.addEventListener('click', async () => {
+        quickFlow.disabled = true;
+        try {
+            await createQuickSingleNodeFlowPreset(select);
+        } catch (error) {
+            console.error(`[${MODULE_NAME}] quick Flow preset creation failed:`, error);
+            notify('error', t('Could not create the Flow quick single-node preset.'));
+        } finally {
+            quickFlow.disabled = false;
+        }
+    });
+    actions.appendChild(quickFlow);
+    host.appendChild(actions);
+
     select.insertAdjacentElement('afterend', host);
     select.hidden = true;
     select.tabIndex = -1;
@@ -367,6 +420,7 @@ function ensureModePickerStyles() {
         .luker-orch-mode-card-summary { opacity: .82; font-size: .9em; line-height: 1.35; }
         .luker-orch-mode-card-meta { display: flex; flex-wrap: wrap; gap: 5px; }
         .luker-orch-mode-card-meta > span { padding: 2px 6px; border: 1px solid var(--SmartThemeBorderColor); border-radius: 999px; font-size: .78em; opacity: .9; }
+        .luker-orch-mode-actions { display: flex; justify-content: flex-start; gap: 8px; }
         .luker-orch-mode-legacy { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px; border: 1px dashed var(--SmartThemeQuoteColor); border-radius: 8px; }
         .luker-orch-mode-legacy-copy { display: grid; gap: 3px; min-width: 0; }
         .luker-orch-mode-legacy-copy span { opacity: .8; font-size: .9em; }
@@ -413,4 +467,4 @@ if (typeof document !== 'undefined') {
     }
 }
 
-export { buildQuickSingleNodeFlowPayload, convertLegacySingleToFlow };
+export { buildQuickSingleNodeFlowPayload, convertLegacySingleToFlow, createQuickSingleNodeFlowPreset };
