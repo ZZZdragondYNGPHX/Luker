@@ -52,6 +52,38 @@ Integration state:
 - `custom-release` includes this private fix.
 - Do not use this fix branch as the base for unrelated bugs or features.
 
+### Storage Inspector extension leaf navigation
+
+Branch:
+
+`fix/storage-inspector-extension-drilldown`
+
+Known isolated fix head:
+
+`c2dd5e831747f91911dfdebff5f7ec50df9b0a29`
+
+Custom integration commits:
+
+- `23ff6be1d5dea1e815f0fa6c03e9167f21f95427` — reconcile the leaf-navigation fix with the existing `custom-release` Storage Inspector UI changes.
+- `d298e7176f2458f3f21d40f607a12965e8b46e1b` — add the custom-branch end-to-end regression.
+
+Purpose:
+
+- Prevent the Storage Inspector from attempting to navigate below categories that the backend marks as `isLeaf: true`, especially `extensions`.
+- Hide summary drill UI, row chevrons, and click navigation for leaf responses.
+- Preserve the existing `custom-release` retry/error handling and backup/leaf-summary behavior.
+
+Important historical root cause:
+
+The backend correctly treats `extensions` as a leaf category, but its generic directory enumeration can still mark individual extension directories with `canDrill: true`. The frontend previously trusted the row-level flag and requested paths such as `["extensions", "<extension>"]`, which the backend rejects with `E_INVALID_PATH: extensions category is a leaf`. The fix makes response-level `isLeaf` authoritative.
+
+Integration state:
+
+- The isolated fix branch remains available for upstream-compatible review.
+- `custom-release` includes the reconciled private integration of this fix.
+- The integration regression seeds a real extension directory and verifies that no deeper navigation UI or error path is exposed.
+- Do not use this fix branch as the base for unrelated bugs or features.
+
 ## Last known official baseline snapshot
 
 At the time this handoff was originally written:
