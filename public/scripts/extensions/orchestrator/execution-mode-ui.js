@@ -22,11 +22,76 @@ import {
     getCharacterIndexByAvatar,
 } from './character-overrides.js';
 import { persistOrchestratorCharacterExtension } from './editor-persist.js';
+import { i18n } from './i18n.js';
 
 const MODULE_NAME = 'orchestrator';
+
+const EXECUTION_MODE_LOCALE_ZH_CN = Object.freeze({
+    'Flow · Workflow': 'Flow · 流程编排',
+    'Use a fixed workflow with explicit roles and Review / Rerun quality gates.': '固定流程、明确分工，并通过 Review / Rerun 控制质量。',
+    'I decide the flow': '我决定流程',
+    'Serial/parallel · Review / Rerun': '串并行 · Review / Rerun',
+    'Planner · Dynamic dispatch': 'Planner · 动态调度',
+    'Let the Planner maintain the task board and dynamically dispatch experts as needed.': '由 Planner 维护任务板，并按局势动态选择与调度专家。',
+    'AI chooses which experts to use': 'AI 决定用哪些专家',
+    'TODO · Dynamic dispatch · Final Agent': 'TODO · 动态派工 · Final Agent',
+    'Agent Loop · Autonomous loop': 'Agent Loop · 自治循环',
+    'One Agent keeps using tools and self-correcting in the same session until it finishes.': '一个 Agent 在同一会话里持续调用工具、自我修正，直到主动完成。',
+    'One Agent investigates until done': '一个 Agent 自己查到搞定',
+    'Single Agent · Tool loop · Self-correction': '单 Agent · 工具循环 · 自我修正',
+    'Director · Generation takeover': 'Director · 导演接管',
+    'The main Director can dispatch sub-agents and directly write or revise the final assistant reply.': '主导演可调度子 Agent，并直接撰写、修改最终助手正文。',
+    'AI team writes the final reply': 'AI 团队直接把正文写完',
+    'Main Director · Sub-Agents · Message writing': '主导演 · 子 Agent · 正文写入',
+    'Output: orchestration guidance': '产物：编排建议',
+    'Output: final reply': '产物：最终正文',
+    'Legacy Single Agent (compatibility mode)': '旧版单 Agent（兼容模式）',
+    'Existing legacy configs keep running; new configs should use Flow with the quick single-node template.': '保留旧配置可继续运行；新配置请使用 Flow 的快速单节点模板。',
+    'Legacy compatibility entry': '旧版兼容入口',
+    'Legacy · Single-node Spec': 'Legacy · 单节点 Spec',
+    'Choose who owns the workflow and who writes the final reply.': '选择谁负责流程，以及最终产物由谁写入正文。',
+    'Convert to Flow quick single-node': '转换为 Flow 快速单节点',
+    'Quick single-node (migrated from Legacy Single)': '快速单节点（迁移自旧版 Single）',
+    'Could not read orchestration settings; conversion was not performed.': '无法读取编排设置，未执行转换。',
+    'Could not create the Flow quick single-node preset; Legacy Single was left unchanged.': '无法创建 Flow 快速单节点预设，旧版 Single 保持不变。',
+    'Could not write the Flow quick single-node preset; Legacy Single was left unchanged.': '写入 Flow 快速单节点预设失败，旧版 Single 保持不变。',
+    'Could not save the Flow quick single-node preset; Legacy Single was left unchanged.': '保存 Flow 快速单节点预设失败，旧版 Single 保持不变。',
+    'Converted to a Flow quick single-node preset. Legacy Single prompts were kept for compatibility.': '已转换为 Flow 快速单节点预设；旧版 Single 提示词仍保留作兼容。',
+    'Conversion failed; Legacy Single was left unchanged.': '转换失败，旧版 Single 保持不变。',
+});
+
+const EXECUTION_MODE_LOCALE_ZH_TW = Object.freeze({
+    ...EXECUTION_MODE_LOCALE_ZH_CN,
+    'Flow · Workflow': 'Flow · 流程編排',
+    'Use a fixed workflow with explicit roles and Review / Rerun quality gates.': '固定流程、明確分工，並透過 Review / Rerun 控制品質。',
+    'I decide the flow': '我決定流程',
+    'Planner · Dynamic dispatch': 'Planner · 動態調度',
+    'Let the Planner maintain the task board and dynamically dispatch experts as needed.': '由 Planner 維護任務板，並依情況動態選擇與調度專家。',
+    'AI chooses which experts to use': 'AI 決定使用哪些專家',
+    'Agent Loop · Autonomous loop': 'Agent Loop · 自治循環',
+    'One Agent keeps using tools and self-correcting in the same session until it finishes.': '一個 Agent 在同一工作階段持續呼叫工具、自我修正，直到主動完成。',
+    'Director · Generation takeover': 'Director · 導演接管',
+    'Output: orchestration guidance': '產物：編排建議',
+    'Output: final reply': '產物：最終正文',
+    'Legacy Single Agent (compatibility mode)': '舊版單 Agent（相容模式）',
+    'Existing legacy configs keep running; new configs should use Flow with the quick single-node template.': '保留舊設定繼續運作；新設定請使用 Flow 的快速單節點範本。',
+    'Choose who owns the workflow and who writes the final reply.': '選擇誰負責流程，以及最終產物由誰寫入正文。',
+    'Convert to Flow quick single-node': '轉換為 Flow 快速單節點',
+});
+
+function registerExecutionModeLocaleData(context) {
+    const addLocaleData = context?.addLocaleData;
+    if (typeof addLocaleData !== 'function') return;
+    addLocaleData('zh-cn', EXECUTION_MODE_LOCALE_ZH_CN);
+    addLocaleData('zh-tw', EXECUTION_MODE_LOCALE_ZH_TW);
+}
+
+function t(text) {
+    return i18n(text);
+}
 const MODE_SELECT_ID = 'luker_orch_execution_mode';
 const MODE_UI_ATTR = 'data-luker-orch-mode-ui';
-const QUICK_FLOW_PRESET_NAME = '快速单节点（迁移自旧版 Single）';
+const QUICK_FLOW_PRESET_NAME = 'Quick single-node (migrated from Legacy Single)';
 
 function getContext() {
     try {
@@ -100,7 +165,7 @@ async function convertLegacySingleToFlow(select) {
     const context = getContext();
     const settings = getSettings(context);
     if (!context || !settings) {
-        notify('error', '无法读取编排设置，未执行转换。');
+        notify('error', t('Could not read orchestration settings; conversion was not performed.'));
         return false;
     }
     if (String(settings.executionMode || '') !== ORCH_EXECUTION_MODE_SINGLE
@@ -121,7 +186,7 @@ async function convertLegacySingleToFlow(select) {
         settings,
         ORCH_EXECUTION_MODE_SPEC,
         scope,
-        { name: QUICK_FLOW_PRESET_NAME },
+        { name: t(QUICK_FLOW_PRESET_NAME) },
         options,
     );
 
@@ -137,12 +202,12 @@ async function convertLegacySingleToFlow(select) {
             settings,
             ORCH_EXECUTION_MODE_SPEC,
             scope,
-            { name: QUICK_FLOW_PRESET_NAME },
+            { name: t(QUICK_FLOW_PRESET_NAME) },
             options,
         );
     }
     if (!presetId) {
-        notify('error', '无法创建 Flow 快速单节点预设，旧版 Single 保持不变。');
+        notify('error', t('Could not create the Flow quick single-node preset; Legacy Single was left unchanged.'));
         return false;
     }
 
@@ -162,7 +227,7 @@ async function convertLegacySingleToFlow(select) {
         if (finalPreviousActiveId) {
             setActivePresetId(settings, ORCH_EXECUTION_MODE_SPEC, scope, finalPreviousActiveId, finalOptions);
         }
-        notify('error', '写入 Flow 快速单节点预设失败，旧版 Single 保持不变。');
+        notify('error', t('Could not write the Flow quick single-node preset; Legacy Single was left unchanged.'));
         return false;
     }
 
@@ -172,13 +237,13 @@ async function convertLegacySingleToFlow(select) {
         if (finalPreviousActiveId) {
             setActivePresetId(settings, ORCH_EXECUTION_MODE_SPEC, scope, finalPreviousActiveId, finalOptions);
         }
-        notify('error', '保存 Flow 快速单节点预设失败，旧版 Single 保持不变。');
+        notify('error', t('Could not save the Flow quick single-node preset; Legacy Single was left unchanged.'));
         return false;
     }
 
     select.value = ORCH_EXECUTION_MODE_SPEC;
     select.dispatchEvent(new Event('change', { bubbles: true }));
-    notify('success', '已转换为 Flow 快速单节点预设；旧版 Single 提示词仍保留作兼容。');
+    notify('success', t('Converted to a Flow quick single-node preset. Legacy Single prompts were kept for compatibility.'));
     return true;
 }
 
@@ -196,10 +261,10 @@ function modeCard(definition, selectedMode) {
             <span class="luker-orch-mode-card-capability"></span>
             <span class="luker-orch-mode-card-output"></span>
         </span>`;
-    button.querySelector('.luker-orch-mode-card-title').textContent = definition.title;
-    button.querySelector('.luker-orch-mode-card-summary').textContent = definition.summary;
-    button.querySelector('.luker-orch-mode-card-capability').textContent = definition.capabilityLabel;
-    button.querySelector('.luker-orch-mode-card-output').textContent = definition.outputLabel;
+    button.querySelector('.luker-orch-mode-card-title').textContent = t(definition.title);
+    button.querySelector('.luker-orch-mode-card-summary').textContent = t(definition.summary);
+    button.querySelector('.luker-orch-mode-card-capability').textContent = t(definition.capabilityLabel);
+    button.querySelector('.luker-orch-mode-card-output').textContent = t(definition.outputLabel);
     return button;
 }
 
@@ -226,9 +291,10 @@ function syncModeUi(select, host) {
             <strong></strong>
             <span></span>
         </div>
-        <button type="button" class="menu_button luker-orch-mode-convert">转换为 Flow 快速单节点</button>`;
-    legacy.querySelector('strong').textContent = definition.title;
-    legacy.querySelector('.luker-orch-mode-legacy-copy span').textContent = definition.summary;
+        <button type="button" class="menu_button luker-orch-mode-convert"></button>`;
+    legacy.querySelector('strong').textContent = t(definition.title);
+    legacy.querySelector('.luker-orch-mode-convert').textContent = t('Convert to Flow quick single-node');
+    legacy.querySelector('.luker-orch-mode-legacy-copy span').textContent = t(definition.summary);
     legacy.querySelector('.luker-orch-mode-convert').addEventListener('click', async (event) => {
         const button = event.currentTarget;
         button.disabled = true;
@@ -236,7 +302,7 @@ function syncModeUi(select, host) {
             await convertLegacySingleToFlow(select);
         } catch (error) {
             console.error(`[${MODULE_NAME}] legacy Single conversion failed:`, error);
-            notify('error', '转换失败，旧版 Single 保持不变。');
+            notify('error', t('Conversion failed; Legacy Single was left unchanged.'));
         } finally {
             button.disabled = false;
         }
@@ -246,16 +312,22 @@ function syncModeUi(select, host) {
 
 function decorateModeSelect(select) {
     if (!(select instanceof HTMLSelectElement)) return;
-    if (select.getAttribute(MODE_UI_ATTR) === '1') return;
+    if (select.getAttribute(MODE_UI_ATTR) === '1') {
+        const existingHost = select.nextElementSibling;
+        if (existingHost?.classList?.contains('luker-orch-mode-picker')) {
+            syncModeUi(select, existingHost);
+        }
+        return;
+    }
 
     const host = document.createElement('div');
     host.className = 'luker-orch-mode-picker';
     host.setAttribute('role', 'radiogroup');
-    host.setAttribute('aria-label', '执行模式');
+    host.setAttribute('aria-label', t('Execution mode'));
 
     const intro = document.createElement('div');
     intro.className = 'luker-orch-mode-picker-intro';
-    intro.textContent = '选择谁负责流程，以及最终产物由谁写入正文。';
+    intro.textContent = t('Choose who owns the workflow and who writes the final reply.');
     host.appendChild(intro);
 
     const grid = document.createElement('div');
@@ -315,16 +387,20 @@ function scanModePickers(root = document) {
 }
 
 function initExecutionModeUi() {
+    registerExecutionModeLocaleData(getContext());
     ensureModePickerStyles();
     scanModePickers();
 
     const observer = new MutationObserver((mutations) => {
+        let sawAddedNode = false;
         for (const mutation of mutations) {
             for (const node of mutation.addedNodes) {
                 if (!(node instanceof Element)) continue;
+                sawAddedNode = true;
                 scanModePickers(node);
             }
         }
+        if (sawAddedNode) scanModePickers(document);
     });
     observer.observe(document.body, { childList: true, subtree: true });
 }
