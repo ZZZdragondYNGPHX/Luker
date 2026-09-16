@@ -1,6 +1,6 @@
 /** @jest-environment jsdom */
 
-import { beforeEach, describe, expect, jest, test } from '@jest/globals';
+import { describe, expect, jest, test } from '@jest/globals';
 import {
     ORCH_EXECUTION_MODE_AGENDA,
     ORCH_EXECUTION_MODE_DIRECTOR,
@@ -33,13 +33,10 @@ async function loadUi() {
 }
 
 describe('execution mode picker UI', () => {
-    beforeEach(() => {
-        document.body.innerHTML = '';
-        document.getElementById('luker-orch-mode-picker-styles')?.remove();
-    });
-
-    test('replaces the legacy five-choice presentation with exactly four first-class cards', async () => {
+    test('presents four first-class modes, Legacy Single compatibility, and native change routing', async () => {
         const select = renderLegacySelect(ORCH_EXECUTION_MODE_SPEC);
+        const onChange = jest.fn();
+        select.addEventListener('change', onChange);
         await loadUi();
 
         const cards = [...document.querySelectorAll('.luker-orch-mode-card')];
@@ -54,31 +51,26 @@ describe('execution mode picker UI', () => {
         expect(select.getAttribute('aria-hidden')).toBe('true');
         expect(document.querySelector('.luker-orch-mode-legacy')).toBeNull();
         expect(document.querySelector('.luker-orch-mode-quick-flow').hidden).toBe(false);
-    });
 
-    test('shows Legacy Single as a compatibility panel instead of a selectable card', async () => {
-        renderLegacySelect(ORCH_EXECUTION_MODE_SINGLE);
-        await loadUi();
-
+        // Existing Legacy Single remains runnable/readable but is represented
+        // as a compatibility panel, never as a fifth first-class card.
+        select.value = ORCH_EXECUTION_MODE_SINGLE;
+        select.dispatchEvent(new Event('change', { bubbles: true }));
         expect(document.querySelectorAll('.luker-orch-mode-card')).toHaveLength(4);
         expect(document.querySelector('.luker-orch-mode-legacy')).not.toBeNull();
         expect(document.querySelector('.luker-orch-mode-convert')).not.toBeNull();
         expect(document.querySelector('.luker-orch-mode-quick-flow').hidden).toBe(true);
-    });
 
-    test('card clicks reuse the native select change event chain', async () => {
-        const select = renderLegacySelect(ORCH_EXECUTION_MODE_SPEC);
-        const onChange = jest.fn();
-        select.addEventListener('change', onChange);
-        await loadUi();
-
+        // Mode-card clicks deliberately reuse main.js' existing select change
+        // chain instead of owning a second execution-mode state machine.
+        onChange.mockClear();
         const planner = document.querySelector(`.luker-orch-mode-card[data-mode="${ORCH_EXECUTION_MODE_AGENDA}"]`);
         planner.click();
-
         expect(select.value).toBe(ORCH_EXECUTION_MODE_AGENDA);
         expect(onChange).toHaveBeenCalledTimes(1);
         expect(planner.classList.contains('is-active')).toBe(true);
         expect(planner.getAttribute('aria-checked')).toBe('true');
+        expect(document.querySelector('.luker-orch-mode-legacy')).toBeNull();
         expect(document.querySelector(`.luker-orch-mode-card[data-mode="${ORCH_EXECUTION_MODE_SPEC}"]`).getAttribute('aria-checked')).toBe('false');
     });
 });
