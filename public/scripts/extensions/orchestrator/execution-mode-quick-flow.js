@@ -66,6 +66,35 @@ function failed(reason, extra = {}) {
     return { ok: false, reason, ...extra };
 }
 
+function clonePlainObject(value) {
+    if (!value || typeof value !== 'object') return value;
+    if (typeof structuredClone === 'function') return structuredClone(value);
+    return JSON.parse(JSON.stringify(value));
+}
+
+function restoreObjectInPlace(target, snapshot) {
+    if (!target || typeof target !== 'object') return false;
+    for (const key of Object.keys(target)) delete target[key];
+    if (snapshot && typeof snapshot === 'object') {
+        Object.assign(target, clonePlainObject(snapshot));
+    }
+    return true;
+}
+
+function captureCharacterSnapshot(context, avatar, deps) {
+    if (!avatar) return null;
+    const extension = deps.getCharacterExtensionDataByAvatar(context, avatar);
+    return extension && typeof extension === 'object'
+        ? clonePlainObject(extension)
+        : null;
+}
+
+function restoreCharacterSnapshot(context, avatar, snapshot, deps) {
+    if (!avatar || !snapshot || typeof snapshot !== 'object') return false;
+    const extension = deps.getCharacterExtensionDataByAvatar(context, avatar);
+    return restoreObjectInPlace(extension, snapshot);
+}
+
 async function persistPresetScope(context, scope, avatar, deps) {
     if (scope !== 'character') {
         if (typeof context?.saveSettings === 'function') {
@@ -87,7 +116,17 @@ async function persistPresetScope(context, scope, avatar, deps) {
             [ORCH_EXECUTION_MODE_SPEC]: true,
         },
     };
-    return Boolean(await deps.persistOrchestratorCharacterExtension(context, characterIndex, nextExtension));
+    const persisted = Boolean(await deps.persistOrchestratorCharacterExtension(context, characterIndex, nextExtension));
+    if (persisted) {
+        // `createPreset` / `writeActivePreset` mutate the live character
+        // extension container in place, while the mode pin + enabled flag are
+        // assembled on a cloned payload for `writeExtensionField`. Mirror the
+        // committed payload back into the same live object so the current
+        // session and the on-card value cannot diverge when the persistence
+        // helper does not itself replace the in-memory extension object.
+        restoreObjectInPlace(extension, nextExtension);
+    }
+    return persisted;
 }
 
 function applyRollback(context, {
@@ -96,12 +135,34 @@ function applyRollback(context, {
     avatar,
     presetId,
     previousActiveId,
+    characterSnapshot,
     deps,
 }) {
+    if (scope === 'character' && characterSnapshot) {
+        restoreCharacterSnapshot(context, avatar, characterSnapshot, deps);
+        return;
+    }
+
     const options = { context, avatar };
     deps.deletePreset(settings, ORCH_EXECUTION_MODE_SPEC, scope, presetId, options);
     if (previousActiveId) {
         deps.setActivePresetId(settings, ORCH_EXECUTION_MODE_SPEC, scope, previousActiveId, options);
+    }
+}
+
+async function compensateCharacterPersistence(context, avatar, snapshot, deps) {
+    if (!avatar || !snapshot || typeof snapshot !== 'object') return true;
+    const characterIndex = deps.getCharacterIndexByAvatar(context, avatar);
+    if (characterIndex < 0) return false;
+    try {
+        return Boolean(await deps.persistOrchestratorCharacterExtension(
+            context,
+            characterIndex,
+            clonePlainObject(snapshot),
+        ));
+    } catch (error) {
+        console.warn('[orchestrator] quick Flow character rollback persistence failed:', error);
+        return false;
     }
 }
 
@@ -112,6 +173,13 @@ function applyRollback(context, {
  * mode switching is NOT performed here. The UI only switches to `spec` after
  * this function returns ok=true. Any create/activate/write/persist failure
  * removes the newly-created preset and restores the previous active id.
+ *
+ * Character scope needs a stronger rollback boundary than global scope:
+ * preset-library mutates the live card extension object before the async card
+ * write runs. We therefore snapshot the complete orchestrator extension before
+ * mutation, restore that object exactly on failure, and make a best-effort
+ * compensating card write if the original persistence attempt failed after a
+ * partial remote commit.
  */
 export async function createQuickSingleNodeFlowPreset({
     context,
@@ -137,6 +205,9 @@ export async function createQuickSingleNodeFlowPreset({
         avatar = '';
     }
 
+    let characterSnapshot = scope === 'character'
+        ? captureCharacterSnapshot(context, avatar, deps)
+        : null;
     let options = { context, avatar };
     let previousActiveId = deps.getActivePresetId(settings, ORCH_EXECUTION_MODE_SPEC, { scope, ...options });
     let presetId = deps.createPreset(
@@ -151,8 +222,16 @@ export async function createQuickSingleNodeFlowPreset({
     // accessors. If no writable card-scoped container exists, fall back to the
     // established global library instead of inventing a phantom override.
     if (!presetId && scope === 'character') {
+        // A failed character create is allowed to fall back to global, but the
+        // attempted character path may already have touched live extension
+        // containers. Put the card back exactly as it was before switching
+        // scopes so the fallback itself cannot create a phantom override.
+        if (characterSnapshot) {
+            restoreCharacterSnapshot(context, avatar, characterSnapshot, deps);
+        }
         scope = 'global';
         avatar = '';
+        characterSnapshot = null;
         options = { context, avatar };
         previousActiveId = deps.getActivePresetId(settings, ORCH_EXECUTION_MODE_SPEC, { scope, ...options });
         presetId = deps.createPreset(
@@ -171,6 +250,7 @@ export async function createQuickSingleNodeFlowPreset({
         avatar,
         presetId,
         previousActiveId,
+        characterSnapshot,
         deps,
     };
     const activated = deps.setActivePresetId(
@@ -206,6 +286,17 @@ export async function createQuickSingleNodeFlowPreset({
     }
     if (!persisted) {
         applyRollback(context, rollback);
+        if (scope === 'character' && characterSnapshot) {
+            const rollbackPersisted = await compensateCharacterPersistence(
+                context,
+                avatar,
+                characterSnapshot,
+                deps,
+            );
+            if (!rollbackPersisted) {
+                console.warn('[orchestrator] quick Flow character rollback restored memory but could not confirm card persistence.');
+            }
+        }
         return failed(QUICK_FLOW_FAILURE.PERSIST_FAILED);
     }
 
