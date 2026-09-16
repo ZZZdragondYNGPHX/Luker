@@ -107,6 +107,7 @@ function initExecutionModeProductSync() {
     bindModeSelect(document);
     syncExecutionModeProductUi(document);
 
+    if (typeof MutationObserver !== 'function' || !document.body) return;
     const observer = new MutationObserver((mutations) => {
         let shouldSync = false;
         for (const mutation of mutations) {
