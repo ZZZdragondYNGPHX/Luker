@@ -1,0 +1,43 @@
+name: Execution Mode Redesign Verification
+
+on:
+  push:
+    branches:
+      - feat/execution-mode-redesign
+
+permissions:
+  contents: read
+
+jobs:
+  targeted-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: tests/package-lock.json
+
+      - name: Install test dependencies
+        working-directory: tests
+        run: npm ci
+
+      - name: Run execution-mode redesign tests
+        working-directory: tests
+        run: >-
+          node --experimental-vm-modules node_modules/jest/bin/jest.js
+          --config jest.config.json
+          --runInBand
+          orchestrator/execution-mode-registry.test.js
+          orchestrator/execution-mode-product-sync.test.js
+          orchestrator/execution-mode-quick-flow.test.js
+          orchestrator/execution-mode-quick-flow-integration.test.js
+          orchestrator/character-overrides-presets.test.js
+          orchestrator/character-override-enabled.test.js
+          orchestrator/clear-character-extension-for-mode.test.js
+          orchestrator/abort-mid-run.test.js
