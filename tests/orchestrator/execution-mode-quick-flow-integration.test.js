@@ -1,4 +1,4 @@
-import { describe, expect, jest, test } from '@jest/globals';
+import { beforeAll, describe, expect, jest, test } from '@jest/globals';
 import {
     ORCH_EXECUTION_MODE_SINGLE,
     ORCH_EXECUTION_MODE_SPEC,
@@ -7,6 +7,26 @@ import {
     QUICK_FLOW_FAILURE,
     createQuickSingleNodeFlowPreset,
 } from '../../public/scripts/extensions/orchestrator/execution-mode-quick-flow.js';
+
+// preset-library → agenda-profile → editable-spec → agent-resolution imports
+// the connection-profile resolver. Stub that browser-facing gateway before
+// dynamically importing the real preset library so this suite exercises the
+// real library/sanitizers without pulling the unrelated UI model graph.
+jest.unstable_mockModule('../../public/scripts/extensions/connection-manager/profile-resolver.js', () => ({
+    getChatCompletionConnectionProfiles: () => [],
+}));
+
+let realPresetDeps;
+beforeAll(async () => {
+    const presetLibrary = await import('../../public/scripts/extensions/orchestrator/preset-library.js');
+    realPresetDeps = {
+        createPreset: presetLibrary.createPreset,
+        deletePreset: presetLibrary.deletePreset,
+        getActivePresetId: presetLibrary.getActivePresetId,
+        setActivePresetId: presetLibrary.setActivePresetId,
+        writeActivePreset: presetLibrary.writeActivePreset,
+    };
+});
 
 function makeSettings() {
     return {
@@ -100,6 +120,17 @@ function makeCharacterContext(extension) {
     };
 }
 
+function characterDeps(extension, persist) {
+    return {
+        ...realPresetDeps,
+        getDisplayedScope: () => 'character',
+        getCurrentAvatar: () => 'card.png',
+        getCharacterIndexByAvatar: () => 0,
+        getCharacterExtensionDataByAvatar: () => extension,
+        persistOrchestratorCharacterExtension: persist,
+    };
+}
+
 describe('quick Flow + real preset library', () => {
     test('creates and activates a sanitized single-node Flow preset from Legacy Single', async () => {
         const settings = makeSettings();
@@ -111,6 +142,7 @@ describe('quick Flow + real preset library', () => {
             presetName: 'Migrated real preset',
             legacyConversion: true,
             deps: {
+                ...realPresetDeps,
                 getDisplayedScope: () => 'global',
                 getCurrentAvatar: () => '',
             },
@@ -140,9 +172,6 @@ describe('quick Flow + real preset library', () => {
             userPromptTemplate: 'legacy real user {{last_user}}',
         }));
         expect(context.saveSettings).toHaveBeenCalledTimes(1);
-
-        // The service only commits the preset. The existing main.js select
-        // change handler remains the sole owner of switching executionMode.
         expect(settings.executionMode).not.toBe(ORCH_EXECUTION_MODE_SPEC);
     });
 
@@ -157,11 +186,7 @@ describe('quick Flow + real preset library', () => {
             settings,
             presetName: 'Character migrated',
             legacyConversion: true,
-            deps: {
-                getDisplayedScope: () => 'character',
-                getCurrentAvatar: () => 'card.png',
-                persistOrchestratorCharacterExtension: persist,
-            },
+            deps: characterDeps(extension, persist),
         });
 
         expect(result).toMatchObject({
@@ -197,11 +222,7 @@ describe('quick Flow + real preset library', () => {
             settings,
             presetName: 'Should rollback',
             legacyConversion: true,
-            deps: {
-                getDisplayedScope: () => 'character',
-                getCurrentAvatar: () => 'card.png',
-                persistOrchestratorCharacterExtension: persist,
-            },
+            deps: characterDeps(extension, persist),
         });
 
         expect(result).toEqual({ ok: false, reason: QUICK_FLOW_FAILURE.PERSIST_FAILED });
