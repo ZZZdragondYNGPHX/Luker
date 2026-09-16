@@ -90,15 +90,14 @@ async function persistPresetScope(context, scope, avatar, deps) {
     return Boolean(await deps.persistOrchestratorCharacterExtension(context, characterIndex, nextExtension));
 }
 
-function rollbackPreset(settings, scope, avatar, presetId, previousActiveId, deps) {
-    const options = { context: null, avatar };
-    // The context is filled by the caller before use. Keeping rollback in one
-    // helper ensures every post-create failure restores the same library state.
-    return { settings, scope, presetId, previousActiveId, options, deps };
-}
-
-function applyRollback(context, snapshot) {
-    const { settings, scope, avatar, presetId, previousActiveId, deps } = snapshot;
+function applyRollback(context, {
+    settings,
+    scope,
+    avatar,
+    presetId,
+    previousActiveId,
+    deps,
+}) {
     const options = { context, avatar };
     deps.deletePreset(settings, ORCH_EXECUTION_MODE_SPEC, scope, presetId, options);
     if (previousActiveId) {
@@ -166,7 +165,14 @@ export async function createQuickSingleNodeFlowPreset({
     }
     if (!presetId) return failed(QUICK_FLOW_FAILURE.CREATE_FAILED);
 
-    const rollback = rollbackPreset(settings, scope, avatar, presetId, previousActiveId, deps);
+    const rollback = {
+        settings,
+        scope,
+        avatar,
+        presetId,
+        previousActiveId,
+        deps,
+    };
     const activated = deps.setActivePresetId(
         settings,
         ORCH_EXECUTION_MODE_SPEC,
