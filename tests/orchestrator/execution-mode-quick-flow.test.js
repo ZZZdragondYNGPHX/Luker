@@ -180,7 +180,105 @@ describe('quick Flow single-node conversion', () => {
                 overrideEnabled: expect.objectContaining({ agenda: true, spec: true }),
             }),
         );
+        expect(extension).toEqual(expect.objectContaining({
+            override: { mode: ORCH_EXECUTION_MODE_SPEC },
+            overrideEnabled: expect.objectContaining({ agenda: true, spec: true }),
+        }));
         expect(context.saveSettings).not.toHaveBeenCalled();
+    });
+
+    test('restores the exact character extension and compensates card persistence after a failed write', async () => {
+        const settings = makeLegacySettings();
+        const originalExtension = {
+            override: { mode: ORCH_EXECUTION_MODE_SINGLE },
+            overrideEnabled: { agenda: true },
+            presetLibraries: { spec: { old: { name: 'Old', spec: { stages: [] }, presets: {} } } },
+            activePresetIds: { spec: 'old' },
+            privateMarker: { keep: true },
+        };
+        const extension = structuredClone(originalExtension);
+        const createPreset = jest.fn(() => {
+            extension.presetLibraries.spec.new = { name: 'New' };
+            return 'new';
+        });
+        const setActivePresetId = jest.fn((_, __, ___, id) => {
+            extension.activePresetIds.spec = id;
+            return true;
+        });
+        const writeActivePreset = jest.fn(() => {
+            extension.presetLibraries.spec.new = {
+                name: 'New',
+                spec: { stages: [{ id: 'single', mode: 'serial', nodes: [] }] },
+                presets: {},
+            };
+            return { ok: true };
+        });
+        const persist = jest.fn()
+            .mockResolvedValueOnce(false)
+            .mockResolvedValueOnce(true);
+        const deps = makeDeps({
+            getDisplayedScope: jest.fn(() => 'character'),
+            getCurrentAvatar: jest.fn(() => 'card.png'),
+            getCharacterIndexByAvatar: jest.fn(() => 4),
+            getCharacterExtensionDataByAvatar: jest.fn(() => extension),
+            createPreset,
+            setActivePresetId,
+            writeActivePreset,
+            persistOrchestratorCharacterExtension: persist,
+        });
+
+        const result = await createQuickSingleNodeFlowPreset({
+            context: { saveSettings: jest.fn() },
+            settings,
+            deps,
+        });
+
+        expect(result).toEqual({ ok: false, reason: QUICK_FLOW_FAILURE.PERSIST_FAILED });
+        expect(extension).toEqual(originalExtension);
+        expect(persist).toHaveBeenCalledTimes(2);
+        expect(persist).toHaveBeenNthCalledWith(
+            2,
+            expect.any(Object),
+            4,
+            originalExtension,
+        );
+        expect(deps.deletePreset).not.toHaveBeenCalled();
+    });
+
+    test('restores character mutations before falling back to the global library', async () => {
+        const settings = makeLegacySettings();
+        const originalExtension = {
+            presetLibraries: { spec: {} },
+            activePresetIds: { spec: '' },
+            marker: 'original',
+        };
+        const extension = structuredClone(originalExtension);
+        const createPreset = jest.fn((_, __, scope) => {
+            if (scope === 'character') {
+                extension.presetLibraries.spec.temporary = { name: 'Temporary' };
+                extension.activePresetIds.spec = 'temporary';
+                extension.marker = 'mutated';
+                return '';
+            }
+            return 'global-new';
+        });
+        const deps = makeDeps({
+            getDisplayedScope: jest.fn(() => 'character'),
+            getCurrentAvatar: jest.fn(() => 'card.png'),
+            getCharacterIndexByAvatar: jest.fn(() => 2),
+            getCharacterExtensionDataByAvatar: jest.fn(() => extension),
+            createPreset,
+            getActivePresetId: jest.fn((_, __, { scope }) => scope === 'character' ? '' : 'global-old'),
+        });
+        const context = { saveSettings: jest.fn(async () => {}) };
+
+        const result = await createQuickSingleNodeFlowPreset({ context, settings, deps });
+
+        expect(result).toMatchObject({ ok: true, scope: 'global', avatar: '', presetId: 'global-new' });
+        expect(extension).toEqual(originalExtension);
+        expect(createPreset).toHaveBeenCalledTimes(2);
+        expect(context.saveSettings).toHaveBeenCalledTimes(1);
+        expect(deps.persistOrchestratorCharacterExtension).not.toHaveBeenCalled();
     });
 
     test('falls back to global when character scope has no writable preset container', async () => {
