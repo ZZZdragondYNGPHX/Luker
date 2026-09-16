@@ -5,13 +5,25 @@ import {
     getCharacterIndexByAvatar,
 } from './character-overrides.js';
 import { persistOrchestratorCharacterExtension } from './editor-persist.js';
+import {
+    createPreset,
+    deletePreset,
+    getActivePresetId,
+    setActivePresetId,
+    writeActivePreset,
+} from './preset-library.js';
 import { configureQuickFlowRuntimeDeps } from './execution-mode-quick-flow.js';
 
-// Keep browser-only editor/snapshot/card-persistence imports outside the pure
-// quick-Flow transaction module. Production still reuses the orchestrator's
-// existing sources of truth; Jest/Node can exercise the transaction core
-// without pulling unrelated DOM-only modules into the import graph.
+// Keep browser/editor/preset-library dependencies outside the pure quick-Flow
+// transaction module. Production still reuses the orchestrator's canonical
+// preset/scope/avatar/card-persistence helpers, while Jest/Node can exercise
+// commit/rollback semantics without inheriting the full browser import graph.
 configureQuickFlowRuntimeDeps({
+    createPreset,
+    deletePreset,
+    getActivePresetId,
+    setActivePresetId,
+    writeActivePreset,
     getDisplayedScope,
     getCurrentAvatar,
     getCharacterExtensionDataByAvatar,
