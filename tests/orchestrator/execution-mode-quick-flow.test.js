@@ -1,5 +1,7 @@
 import { describe, expect, jest, test } from '@jest/globals';
 import {
+    DEFAULT_SINGLE_AGENT_SYSTEM_PROMPT,
+    DEFAULT_SINGLE_AGENT_USER_PROMPT_TEMPLATE,
     ORCH_EXECUTION_MODE_SINGLE,
     ORCH_EXECUTION_MODE_SPEC,
 } from '../../public/scripts/extensions/orchestrator/defaults.js';
@@ -50,7 +52,7 @@ describe('quick Flow single-node conversion', () => {
         });
     });
 
-    test('commits global preset first and leaves executionMode switching to the UI', async () => {
+    test('commits global legacy conversion first and leaves executionMode switching to the UI', async () => {
         const settings = makeLegacySettings();
         const context = { saveSettings: jest.fn(async () => {}) };
         const deps = makeDeps();
@@ -75,12 +77,46 @@ describe('quick Flow single-node conversion', () => {
             settings,
             ORCH_EXECUTION_MODE_SPEC,
             'global',
-            expect.objectContaining({ presets: expect.any(Object), spec: expect.any(Object) }),
+            expect.objectContaining({
+                presets: {
+                    single_agent: {
+                        systemPrompt: 'legacy system',
+                        userPromptTemplate: 'legacy user {{last_user}}',
+                    },
+                },
+                spec: expect.any(Object),
+            }),
             { context, avatar: '' },
         );
         expect(context.saveSettings).toHaveBeenCalledTimes(1);
         expect(settings.executionMode).toBe(ORCH_EXECUTION_MODE_SINGLE);
         expect(deps.deletePreset).not.toHaveBeenCalled();
+    });
+
+    test('ordinary quick Flow creation ignores stale legacy prompt customization', async () => {
+        const settings = makeLegacySettings();
+        settings.executionMode = ORCH_EXECUTION_MODE_SPEC;
+        settings.singleAgentModeEnabled = false;
+        const context = { saveSettings: jest.fn(async () => {}) };
+        const deps = makeDeps();
+
+        const result = await createQuickSingleNodeFlowPreset({ context, settings, deps });
+
+        expect(result).toMatchObject({ ok: true, legacyConversion: false });
+        expect(deps.writeActivePreset).toHaveBeenCalledWith(
+            settings,
+            ORCH_EXECUTION_MODE_SPEC,
+            'global',
+            expect.objectContaining({
+                presets: {
+                    single_agent: {
+                        systemPrompt: DEFAULT_SINGLE_AGENT_SYSTEM_PROMPT,
+                        userPromptTemplate: DEFAULT_SINGLE_AGENT_USER_PROMPT_TEMPLATE,
+                    },
+                },
+            }),
+            { context, avatar: '' },
+        );
     });
 
     test('rejects legacy conversion when legacy Single is not active', async () => {
@@ -135,10 +171,13 @@ describe('quick Flow single-node conversion', () => {
         );
     });
 
-    test('rolls back when global persistence throws', async () => {
+    test('rolls back and attempts a compensating global save when persistence throws', async () => {
         const settings = makeLegacySettings();
         const deps = makeDeps();
-        const context = { saveSettings: jest.fn(async () => { throw new Error('disk failed'); }) };
+        const saveSettings = jest.fn()
+            .mockRejectedValueOnce(new Error('disk failed'))
+            .mockResolvedValueOnce(undefined);
+        const context = { saveSettings };
         const result = await createQuickSingleNodeFlowPreset({ context, settings, deps });
 
         expect(result).toEqual({ ok: false, reason: QUICK_FLOW_FAILURE.PERSIST_FAILED });
@@ -150,6 +189,7 @@ describe('quick Flow single-node conversion', () => {
             'old',
             { context, avatar: '' },
         );
+        expect(saveSettings).toHaveBeenCalledTimes(2);
     });
 
     test('persists character Flow override without disturbing other override-enabled modes', async () => {
