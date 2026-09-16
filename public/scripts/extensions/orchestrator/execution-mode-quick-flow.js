@@ -4,13 +4,6 @@ import {
     ORCH_EXECUTION_MODE_SINGLE,
     ORCH_EXECUTION_MODE_SPEC,
 } from './defaults.js';
-import {
-    createPreset,
-    deletePreset,
-    getActivePresetId,
-    setActivePresetId,
-    writeActivePreset,
-} from './preset-library.js';
 
 export const QUICK_FLOW_FAILURE = Object.freeze({
     SETTINGS_UNAVAILABLE: 'settings_unavailable',
@@ -62,15 +55,15 @@ function fallbackGetCharacterExtensionDataByAvatar(context, avatar) {
 }
 
 const DEFAULT_DEPS = Object.freeze({
-    createPreset,
-    deletePreset,
-    getActivePresetId,
-    setActivePresetId,
-    writeActivePreset,
-    // Browser/UI-specific sources of truth are registered by
-    // execution-mode-quick-flow-browser-deps.js. Pure fallbacks keep this
-    // transaction module importable under Node/Jest and make global-scope
-    // callers deterministic even outside the UI bootstrap.
+    // Production registers the canonical preset-library actions through
+    // execution-mode-quick-flow-browser-deps.js. Keeping those imports out of
+    // this transaction core prevents the full browser/sanitizer graph from
+    // being pulled into Node/Jest just to test commit/rollback semantics.
+    createPreset: () => '',
+    deletePreset: () => false,
+    getActivePresetId: () => '',
+    setActivePresetId: () => false,
+    writeActivePreset: () => ({ ok: false }),
     getDisplayedScope: () => 'global',
     getCurrentAvatar: fallbackGetCurrentAvatar,
     getCharacterExtensionDataByAvatar: fallbackGetCharacterExtensionDataByAvatar,
@@ -82,9 +75,9 @@ let configuredRuntimeDeps = {};
 
 /**
  * Register production/browser dependency adapters without making this core
- * module import editor/display modules at evaluation time. Tests can import
- * the transaction service in a pure Node environment; the real orchestrator
- * bootstrap injects the existing scope/avatar/card persistence helpers.
+ * module import editor/display/preset-library modules at evaluation time.
+ * Tests can import the transaction service in a pure Node environment; the
+ * real orchestrator bootstrap injects the existing canonical helpers.
  */
 export function configureQuickFlowRuntimeDeps(deps = {}) {
     if (!deps || typeof deps !== 'object') return;
@@ -147,12 +140,10 @@ async function persistPresetScope(context, scope, avatar, deps) {
     };
     const persisted = Boolean(await deps.persistOrchestratorCharacterExtension(context, characterIndex, nextExtension));
     if (persisted) {
-        // `createPreset` / `writeActivePreset` mutate the live character
-        // extension container in place, while the mode pin + enabled flag are
-        // assembled on a cloned payload for `writeExtensionField`. Mirror the
-        // committed payload back into the same live object so the current
-        // session and the on-card value cannot diverge when the persistence
-        // helper does not itself replace the in-memory extension object.
+        // Preset-library character writes mutate the live card extension in
+        // place, while the mode pin + enabled flag are assembled on a cloned
+        // payload for writeExtensionField. Mirror the committed payload back
+        // into the same live object so memory and card state cannot diverge.
         restoreObjectInPlace(extension, nextExtension);
     }
     return persisted;
@@ -214,17 +205,6 @@ async function compensateCharacterPersistence(context, avatar, snapshot, deps) {
  * mode switching is NOT performed here. The UI only switches to `spec` after
  * this function returns ok=true. Any create/activate/write/persist failure
  * removes the newly-created preset and restores the previous active id.
- *
- * Character scope needs a stronger rollback boundary than global scope:
- * preset-library mutates the live card extension object before the async card
- * write runs. We therefore snapshot the complete orchestrator extension before
- * mutation, restore that object exactly on failure, and make a best-effort
- * compensating card write if the original persistence attempt failed after a
- * partial remote commit.
- *
- * Global persistence also gets a compensating save after rollback. This covers
- * the defensive edge case where `saveSettings()` writes part/all of the new
- * state and then rejects: the second save persists the restored preset library.
  */
 export async function createQuickSingleNodeFlowPreset({
     context,
@@ -267,14 +247,10 @@ export async function createQuickSingleNodeFlowPreset({
         options,
     );
 
-    // Character preset libraries are intentionally not auto-created by read
-    // accessors. If no writable card-scoped container exists, fall back to the
-    // established global library instead of inventing a phantom override.
     if (!presetId && scope === 'character') {
-        // A failed character create is allowed to fall back to global, but the
-        // attempted character path may already have touched live extension
-        // containers. Put the card back exactly as it was before switching
-        // scopes so the fallback itself cannot create a phantom override.
+        // Failed character creation is allowed to fall back to global, but an
+        // implementation may already have touched the live card container.
+        // Restore that container before switching scopes.
         if (characterSnapshot) {
             restoreCharacterSnapshot(context, avatar, characterSnapshot, deps);
         }
@@ -314,10 +290,9 @@ export async function createQuickSingleNodeFlowPreset({
         return failed(QUICK_FLOW_FAILURE.ACTIVATE_FAILED);
     }
 
-    // Explicit Legacy Single migration preserves the old effective prompts.
-    // Ordinary Flow quick-template creation must be clean and deterministic,
-    // so it intentionally seeds from the shipped defaults instead of hidden
-    // legacy fields that may contain stale customization from years ago.
+    // Explicit Legacy Single conversion preserves the old effective prompts.
+    // Ordinary quick-Flow creation uses shipped defaults, not stale hidden
+    // legacy customization.
     const payloadSource = legacyConversion ? settings : null;
     const writeResult = deps.writeActivePreset(
         settings,
