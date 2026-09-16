@@ -11,13 +11,6 @@ import {
     setActivePresetId,
     writeActivePreset,
 } from './preset-library.js';
-import { getDisplayedScope } from './editor-display.js';
-import { getCurrentAvatar } from './snapshot-cache.js';
-import {
-    getCharacterExtensionDataByAvatar,
-    getCharacterIndexByAvatar,
-} from './character-overrides.js';
-import { persistOrchestratorCharacterExtension } from './editor-persist.js';
 
 export const QUICK_FLOW_FAILURE = Object.freeze({
     SETTINGS_UNAVAILABLE: 'settings_unavailable',
@@ -49,18 +42,54 @@ export function buildQuickSingleNodeFlowPayload(settings) {
     };
 }
 
+function fallbackGetCurrentAvatar(context) {
+    const characterId = Number(context?.characterId);
+    if (!Number.isInteger(characterId) || characterId < 0) return '';
+    return String(context?.characters?.[characterId]?.avatar || '');
+}
+
+function fallbackGetCharacterIndexByAvatar(context, avatar) {
+    const target = String(avatar || '');
+    if (!target) return -1;
+    return (context?.characters || []).findIndex(char => String(char?.avatar || '') === target);
+}
+
+function fallbackGetCharacterExtensionDataByAvatar(context, avatar) {
+    const index = fallbackGetCharacterIndexByAvatar(context, avatar);
+    if (index < 0) return {};
+    const payload = context?.characters?.[index]?.data?.extensions?.orchestrator;
+    return payload && typeof payload === 'object' ? payload : {};
+}
+
 const DEFAULT_DEPS = Object.freeze({
     createPreset,
     deletePreset,
     getActivePresetId,
     setActivePresetId,
     writeActivePreset,
-    getDisplayedScope,
-    getCurrentAvatar,
-    getCharacterExtensionDataByAvatar,
-    getCharacterIndexByAvatar,
-    persistOrchestratorCharacterExtension,
+    // Browser/UI-specific sources of truth are registered by
+    // execution-mode-quick-flow-browser-deps.js. Pure fallbacks keep this
+    // transaction module importable under Node/Jest and make global-scope
+    // callers deterministic even outside the UI bootstrap.
+    getDisplayedScope: () => 'global',
+    getCurrentAvatar: fallbackGetCurrentAvatar,
+    getCharacterExtensionDataByAvatar: fallbackGetCharacterExtensionDataByAvatar,
+    getCharacterIndexByAvatar: fallbackGetCharacterIndexByAvatar,
+    persistOrchestratorCharacterExtension: async () => false,
 });
+
+let configuredRuntimeDeps = {};
+
+/**
+ * Register production/browser dependency adapters without making this core
+ * module import editor/display modules at evaluation time. Tests can import
+ * the transaction service in a pure Node environment; the real orchestrator
+ * bootstrap injects the existing scope/avatar/card persistence helpers.
+ */
+export function configureQuickFlowRuntimeDeps(deps = {}) {
+    if (!deps || typeof deps !== 'object') return;
+    configuredRuntimeDeps = { ...configuredRuntimeDeps, ...deps };
+}
 
 function failed(reason, extra = {}) {
     return { ok: false, reason, ...extra };
@@ -204,7 +233,11 @@ export async function createQuickSingleNodeFlowPreset({
     legacyConversion = false,
     deps: injectedDeps = null,
 } = {}) {
-    const deps = injectedDeps ? { ...DEFAULT_DEPS, ...injectedDeps } : DEFAULT_DEPS;
+    const deps = {
+        ...DEFAULT_DEPS,
+        ...configuredRuntimeDeps,
+        ...(injectedDeps && typeof injectedDeps === 'object' ? injectedDeps : {}),
+    };
     if (!context || !settings || typeof settings !== 'object') {
         return failed(QUICK_FLOW_FAILURE.SETTINGS_UNAVAILABLE);
     }
