@@ -15,6 +15,8 @@ import { i18n } from './i18n.js';
 const MODULE_NAME = 'orchestrator';
 const MODE_SELECT_ID = 'luker_orch_execution_mode';
 const MODE_UI_ATTR = 'data-luker-orch-mode-ui';
+const ORCH_UI_BLOCK_ID = 'orchestrator_settings';
+const ORCH_POPUP_SELECTOR = '.luker_orch_editor_popup';
 const QUICK_FLOW_PRESET_NAME = 'Quick single-node';
 const LEGACY_QUICK_FLOW_PRESET_NAME = 'Quick single-node (migrated from Legacy Single)';
 
@@ -340,21 +342,36 @@ function scanModePickers(root = document) {
     if (select) decorateModeSelect(select);
 }
 
+function isOrchestratorUiMutationNode(node) {
+    if (!(node instanceof Element)) return false;
+    if (node.id === MODE_SELECT_ID || node.id === ORCH_UI_BLOCK_ID) return true;
+    if (node.matches?.(ORCH_POPUP_SELECTOR)) return true;
+    if (node.closest?.(`#${ORCH_UI_BLOCK_ID}, ${ORCH_POPUP_SELECTOR}`)) return true;
+    return Boolean(node.querySelector?.(
+        `#${MODE_SELECT_ID}, #${ORCH_UI_BLOCK_ID}, ${ORCH_POPUP_SELECTOR}`,
+    ));
+}
+
 function initExecutionModeUi() {
     registerExecutionModeLocaleData(getContext());
     ensureModePickerStyles();
     scanModePickers();
 
     const observer = new MutationObserver((mutations) => {
-        let sawAddedNode = false;
+        let shouldResync = false;
         for (const mutation of mutations) {
             for (const node of mutation.addedNodes) {
-                if (!(node instanceof Element)) continue;
-                sawAddedNode = true;
+                if (!isOrchestratorUiMutationNode(node)) continue;
+                shouldResync = true;
                 scanModePickers(node);
             }
         }
-        if (sawAddedNode) scanModePickers(document);
+        // main.js sometimes updates the hidden select with jQuery `.val()`
+        // without dispatching a change event (e.g. card/reload paths). A
+        // relevant orchestrator DOM rebuild is our signal to re-read that
+        // property and refresh the card selection. Ordinary chat-message DOM
+        // additions no longer cause a document-wide picker scan.
+        if (shouldResync) scanModePickers(document);
     });
     observer.observe(document.body, { childList: true, subtree: true });
 }
