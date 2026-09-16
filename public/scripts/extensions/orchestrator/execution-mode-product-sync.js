@@ -11,6 +11,7 @@ const MODULE_NAME = 'orchestrator';
 const MODE_SELECT_ID = 'luker_orch_execution_mode';
 const MODE_CHIP_SELECTOR = '.luker-studio-editor-topbar-meta .luker-studio-editor-chip';
 const CAPSULE_BLOCK_SELECTOR = '[data-orch-mode-block="capsule"]';
+const PRODUCT_SURFACE_SELECTOR = `#${MODE_SELECT_ID}, ${MODE_CHIP_SELECTOR}, ${CAPSULE_BLOCK_SELECTOR}`;
 
 function getContext() {
     try {
@@ -18,6 +19,10 @@ function getContext() {
     } catch (_) {
         return null;
     }
+}
+
+function getDocument() {
+    return typeof document !== 'undefined' ? document : null;
 }
 
 export function getExecutionModeProductDefinition(mode) {
@@ -28,10 +33,11 @@ export function executionModeOwnsFinalReply(mode) {
     return getExecutionModeProductDefinition(mode).output === ORCH_EXECUTION_OUTPUT_TAKEOVER;
 }
 
-function resolveExecutionMode(root = document) {
+function resolveExecutionMode(root = getDocument()) {
+    const doc = getDocument();
     const select = root?.getElementById?.(MODE_SELECT_ID)
         || root?.querySelector?.(`#${MODE_SELECT_ID}`)
-        || document?.getElementById?.(MODE_SELECT_ID);
+        || doc?.getElementById?.(MODE_SELECT_ID);
     if (select?.value) return String(select.value);
 
     const context = getContext();
@@ -79,14 +85,16 @@ function syncModeChip(root, mode) {
  * who owns the final reply (capsule visibility) and the public mode title in
  * the orchestration-editor topbar.
  */
-export function syncExecutionModeProductUi(root = document, explicitMode = '') {
-    if (typeof document === 'undefined') return;
+export function syncExecutionModeProductUi(root = getDocument(), explicitMode = '') {
+    const doc = getDocument();
+    if (!doc || !root) return;
     const mode = String(explicitMode || resolveExecutionMode(root));
     syncCapsuleVisibility(root, mode);
     syncModeChip(root, mode);
 }
 
-function deferSync(root = document) {
+function deferSync(root = getDocument()) {
+    if (!root) return;
     const run = () => syncExecutionModeProductUi(root);
     if (typeof queueMicrotask === 'function') {
         queueMicrotask(run);
@@ -95,32 +103,44 @@ function deferSync(root = document) {
     }
 }
 
-function bindModeSelect(root = document) {
+function bindModeSelect(root = getDocument()) {
     const select = root?.getElementById?.(MODE_SELECT_ID)
         || root?.querySelector?.(`#${MODE_SELECT_ID}`);
     if (!select || select.dataset.lukerOrchProductSync === '1') return;
     select.dataset.lukerOrchProductSync = '1';
-    select.addEventListener('change', () => deferSync(document));
+    select.addEventListener('change', () => deferSync(getDocument()));
+}
+
+function isProductUiMutationNode(node) {
+    if (!node || typeof node !== 'object') return false;
+    if (node.id === MODE_SELECT_ID) return true;
+    if (node.matches?.(MODE_CHIP_SELECTOR) || node.matches?.(CAPSULE_BLOCK_SELECTOR)) return true;
+    if (node.closest?.(MODE_CHIP_SELECTOR) || node.closest?.(CAPSULE_BLOCK_SELECTOR)) return true;
+    return Boolean(node.querySelector?.(PRODUCT_SURFACE_SELECTOR));
 }
 
 function initExecutionModeProductSync() {
-    bindModeSelect(document);
-    syncExecutionModeProductUi(document);
+    const doc = getDocument();
+    if (!doc) return;
+    bindModeSelect(doc);
+    syncExecutionModeProductUi(doc);
 
-    if (typeof MutationObserver !== 'function' || !document.body) return;
+    if (typeof MutationObserver !== 'function' || !doc.body) return;
     const observer = new MutationObserver((mutations) => {
         let shouldSync = false;
         for (const mutation of mutations) {
-            if (mutation.addedNodes?.length) {
+            for (const node of mutation.addedNodes || []) {
+                if (!isProductUiMutationNode(node)) continue;
                 shouldSync = true;
                 break;
             }
+            if (shouldSync) break;
         }
         if (!shouldSync) return;
-        bindModeSelect(document);
-        deferSync(document);
+        bindModeSelect(doc);
+        deferSync(doc);
     });
-    observer.observe(document.body, { childList: true, subtree: true });
+    observer.observe(doc.body, { childList: true, subtree: true });
 }
 
 if (typeof document !== 'undefined') {
