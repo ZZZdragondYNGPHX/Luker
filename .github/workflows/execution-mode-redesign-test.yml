@@ -19,9 +19,14 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22.19.0'
           cache: npm
-          cache-dependency-path: tests/package-lock.json
+          cache-dependency-path: |
+            package-lock.json
+            tests/package-lock.json
+
+      - name: Install app dependencies
+        run: npm ci
 
       - name: Install test dependencies
         working-directory: tests
