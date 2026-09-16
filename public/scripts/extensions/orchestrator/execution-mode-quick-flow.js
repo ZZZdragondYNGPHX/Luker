@@ -150,6 +150,17 @@ function applyRollback(context, {
     }
 }
 
+async function compensateGlobalPersistence(context) {
+    if (typeof context?.saveSettings !== 'function') return true;
+    try {
+        await context.saveSettings();
+        return true;
+    } catch (error) {
+        console.warn('[orchestrator] quick Flow global rollback persistence failed:', error);
+        return false;
+    }
+}
+
 async function compensateCharacterPersistence(context, avatar, snapshot, deps) {
     if (!avatar || !snapshot || typeof snapshot !== 'object') return true;
     const characterIndex = deps.getCharacterIndexByAvatar(context, avatar);
@@ -167,7 +178,8 @@ async function compensateCharacterPersistence(context, avatar, snapshot, deps) {
 }
 
 /**
- * Create a Flow preset equivalent to the legacy Single runtime profile.
+ * Create a Flow preset equivalent to the legacy Single runtime profile, or a
+ * clean default single-node Flow preset for normal (non-legacy) creation.
  *
  * This is intentionally transactional from the caller's point of view:
  * mode switching is NOT performed here. The UI only switches to `spec` after
@@ -180,6 +192,10 @@ async function compensateCharacterPersistence(context, avatar, snapshot, deps) {
  * mutation, restore that object exactly on failure, and make a best-effort
  * compensating card write if the original persistence attempt failed after a
  * partial remote commit.
+ *
+ * Global persistence also gets a compensating save after rollback. This covers
+ * the defensive edge case where `saveSettings()` writes part/all of the new
+ * state and then rejects: the second save persists the restored preset library.
  */
 export async function createQuickSingleNodeFlowPreset({
     context,
@@ -265,11 +281,16 @@ export async function createQuickSingleNodeFlowPreset({
         return failed(QUICK_FLOW_FAILURE.ACTIVATE_FAILED);
     }
 
+    // Explicit Legacy Single migration preserves the old effective prompts.
+    // Ordinary Flow quick-template creation must be clean and deterministic,
+    // so it intentionally seeds from the shipped defaults instead of hidden
+    // legacy fields that may contain stale customization from years ago.
+    const payloadSource = legacyConversion ? settings : null;
     const writeResult = deps.writeActivePreset(
         settings,
         ORCH_EXECUTION_MODE_SPEC,
         scope,
-        buildQuickSingleNodeFlowPayload(settings),
+        buildQuickSingleNodeFlowPayload(payloadSource),
         options,
     );
     if (!writeResult || writeResult.ok === false) {
@@ -295,6 +316,11 @@ export async function createQuickSingleNodeFlowPreset({
             );
             if (!rollbackPersisted) {
                 console.warn('[orchestrator] quick Flow character rollback restored memory but could not confirm card persistence.');
+            }
+        } else if (scope === 'global') {
+            const rollbackPersisted = await compensateGlobalPersistence(context);
+            if (!rollbackPersisted) {
+                console.warn('[orchestrator] quick Flow global rollback restored memory but could not confirm settings persistence.');
             }
         }
         return failed(QUICK_FLOW_FAILURE.PERSIST_FAILED);
