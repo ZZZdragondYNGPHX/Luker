@@ -40,6 +40,7 @@ jobs:
           --runInBand
           orchestrator/execution-mode-registry.test.js
           orchestrator/execution-mode-product-sync.test.js
+          orchestrator/execution-mode-ui.test.js
           orchestrator/execution-mode-quick-flow.test.js
           orchestrator/execution-mode-quick-flow-integration.test.js
           orchestrator/preset-library.test.js
