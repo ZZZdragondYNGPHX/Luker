@@ -87,7 +87,7 @@ describe('Memory OS extraction schema recovery', () => {
 
         const repairPrompt = requests[1].taskMessages.at(-1).content;
         expect(repairPrompt).toContain('validation_errors');
-        expect(repairPrompt).toContain("unexpected property 'content'");
+        expect(repairPrompt).toContain('unexpected property \'content\'');
         expect(repairPrompt).toContain(FACT_TOOL_NAME);
     });
 
