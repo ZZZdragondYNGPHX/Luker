@@ -58,6 +58,8 @@ export async function collectExtractTransaction({ send, tools, requiredTypes, me
     const calls = [...initialCalls];
     let state = validateExtractTransaction({ calls, tools, requiredTypes, memoryOsEnabled, nodeIds, toolTypes });
     let emptyRetries = 0;
+    let schemaRetries = 0;
+    let validationErrors = [];
     const maxRounds = requiredTypes.length + 3 + maxRepairs;
     for (let round = 0; round < maxRounds; round++) {
         if (signal?.aborted) throw new DOMException('Memory extraction aborted', 'AbortError');
@@ -70,9 +72,10 @@ export async function collectExtractTransaction({ send, tools, requiredTypes, me
             return state.missing.includes(name) || (spec?.op === 'edit' && spec.type !== 'event' && state.requiredWrites.includes(spec.type));
         });
         const messages = !repair ? taskMessages : [
-            { role: 'system', content: 'Complete only the missing extraction steps using the available tools. Completed calls are staged, not committed. Never recreate staged nodes. Do not output analysis or ordinary text.' },
+            { role: 'system', content: 'Complete only the missing extraction steps using the available tools. Completed calls are staged, not committed. Never recreate staged nodes. Calls rejected by schema validation are not staged: correct only those missing calls using the CURRENT exposed tool schema exactly. Do not reuse legacy argument keys or wrappers. Do not output analysis or ordinary text.' },
             { role: 'user', content: JSON.stringify({ phase: state.phase,
-                completed: calls.map(call => ({ name: call.name, ref: call.args?.ref, node_id: call.args?.node_id })), missing: state.missing })
+                completed: calls.map(call => ({ name: call.name, ref: call.args?.ref, node_id: call.args?.node_id })), missing: state.missing,
+                ...(validationErrors.length ? { validation_errors: validationErrors } : {}) })
                 + '\n' + (typeof repairContext === 'string' ? repairContext : repairContext?.[state.phase] || '') },
         ];
         let next;
@@ -88,20 +91,47 @@ export async function collectExtractTransaction({ send, tools, requiredTypes, me
             error.details = state;
             throw error;
         }
-        calls.push(...next);
+
+        const accepted = [];
+        const rejected = [];
+        for (const call of next) {
+            const validationError = validateParsedToolCalls([call], tools);
+            if (validationError) {
+                rejected.push({ name: call?.name || null, reason: validationError });
+            } else {
+                accepted.push(call);
+            }
+        }
+
+        // A completion marker from the same response as a malformed call cannot be
+        // staged safely: the malformed step is still missing, so done would violate
+        // transaction ordering. Valid non-done calls are retained across the retry.
+        calls.push(...(rejected.length ? accepted.filter(call => call.name !== EXTRACT_DONE) : accepted));
         state = validateExtractTransaction({ calls, tools, requiredTypes, memoryOsEnabled, nodeIds, toolTypes });
-        console.debug('[Memory Extract Protocol]', { round, required_event: requiredTypes.includes('event'), actual_calls: calls.map(call => call.name), ...state });
+        validationErrors = rejected;
+        console.debug('[Memory Extract Protocol]', { round, required_event: requiredTypes.includes('event'), actual_calls: calls.map(call => call.name), rejected_calls: rejected, ...state });
+
         if (state.invalid) {
             const error = new Error('Invalid extraction transaction. No new memory was written.');
             error.code = 'memory_extract_protocol';
-            error.details = state;
+            error.details = { ...state, validation_errors: validationErrors };
             throw error;
         }
+        if (rejected.length) {
+            if (++schemaRetries > maxRepairs) {
+                const error = new Error('Extraction tool arguments failed schema validation after retry. No new memory was written.');
+                error.code = 'memory_extract_protocol';
+                error.details = { ...state, validation_errors: validationErrors };
+                throw error;
+            }
+            continue;
+        }
+        validationErrors = [];
         if (state.valid) return calls;
     }
     const error = new Error('Incomplete extraction transaction. No new memory was written.');
     error.code = 'memory_extract_protocol';
-    error.details = state;
+    error.details = { ...state, ...(validationErrors.length ? { validation_errors: validationErrors } : {}) };
     throw error;
 }
 
