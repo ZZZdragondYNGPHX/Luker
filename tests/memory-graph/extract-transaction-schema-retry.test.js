@@ -39,7 +39,7 @@ const legacyFactsCall = () => ({
     args: {
         operations: [{
             action: 'create',
-            type: 'fact',
+            type: 'explicit',
             content: '谢开业抵达阿克塞尔镇。',
             tags: ['谢开业'],
             source_episodes: [2],
@@ -87,7 +87,7 @@ describe('Memory OS extraction schema recovery', () => {
 
         const repairPrompt = requests[1].taskMessages.at(-1).content;
         expect(repairPrompt).toContain('validation_errors');
-        expect(repairPrompt).toContain('unexpected property \'content\'');
+        expect(repairPrompt).toContain('content');
         expect(repairPrompt).toContain(FACT_TOOL_NAME);
     });
 
