@@ -1,0 +1,88 @@
+name: SillyTavern 1.19 sync
+
+on:
+  push:
+    branches:
+      - chore/st-1.19-sync
+    paths:
+      - .github/workflows/st-1.19-sync.yml
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Luker sync branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply SillyTavern 1.18.0 to 1.19.0 delta
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git remote add sillytavern https://github.com/SillyTavern/SillyTavern.git
+          git fetch --no-tags sillytavern \
+            refs/tags/1.18.0:refs/tags/st-upstream-1.18.0 \
+            refs/tags/1.19.0:refs/tags/st-upstream-1.19.0
+
+          git diff --binary --full-index \
+            st-upstream-1.18.0 st-upstream-1.19.0 -- \
+            .eslintrc.cjs .gitignore .npmrc \
+            default package.json package-lock.json plugins.js public src tests \
+            > /tmp/st-1.19.patch
+
+          set +e
+          git apply --3way --index /tmp/st-1.19.patch
+          apply_rc=$?
+          set -e
+
+          mkdir -p .upstream-sync
+          conflict_file=.upstream-sync/1.19-conflicts.txt
+          conflict_patch=.upstream-sync/1.19-conflicts.patch
+          report=.upstream-sync/1.19-report.md
+
+          git diff --name-only --diff-filter=U > "$conflict_file" || true
+          : > "$conflict_patch"
+
+          if [ -s "$conflict_file" ]; then
+            while IFS= read -r file; do
+              printf '\n# ===== %s =====\n' "$file" >> "$conflict_patch"
+              git diff --binary --full-index st-upstream-1.18.0 st-upstream-1.19.0 -- "$file" >> "$conflict_patch" || true
+              git checkout --ours -- "$file"
+              git add -- "$file"
+            done < "$conflict_file"
+          fi
+
+          {
+            echo "# SillyTavern 1.19.0 upstream sync report"
+            echo
+            echo "- Source delta: SillyTavern 1.18.0 -> 1.19.0"
+            echo "- Target base: Luker chore/st-1.19-sync"
+            echo "- git apply --3way exit code: $apply_rc"
+            echo
+            echo "## Files requiring manual reconciliation"
+            if [ -s "$conflict_file" ]; then
+              sed 's/^/- `/' "$conflict_file" | sed 's/$/`/'
+            else
+              echo "- None"
+            fi
+            echo
+            echo "Conflicting paths were restored to the Luker side so the branch never commits conflict markers."
+            echo "The exact upstream delta for those paths is stored in \`.upstream-sync/1.19-conflicts.patch\`."
+          } > "$report"
+
+          git add -A
+
+          if git diff --cached --quiet; then
+            echo "No changes produced by upstream sync."
+            exit 0
+          fi
+
+          git commit -m "chore(upstream): stage SillyTavern 1.19.0 sync"
+          git push origin HEAD:chore/st-1.19-sync
