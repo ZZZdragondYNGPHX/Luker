@@ -3,6 +3,77 @@ import { FACT_TOOL_NAME } from './fact-extraction.js';
 
 export const EXTRACT_DONE = 'luker_rpg_extract_done';
 
+const RELATION_TARGET_SEMANTIC_TYPE = Object.freeze({
+    occurred_at: 'location_state',
+    involved_in: 'character_sheet',
+    advances: 'thread',
+    updates: 'thread',
+    partner_of: 'character_sheet',
+    family_of: 'character_sheet',
+    allied_with: 'character_sheet',
+    hostile_to: 'character_sheet',
+    mentor_of: 'character_sheet',
+    sworn_to: 'character_sheet',
+    debt_owed_to: 'character_sheet',
+    deceiving: 'character_sheet',
+});
+
+/**
+ * Recover a local semantic ref when the model created exactly one compatible
+ * semantic target without a ref, then referenced a single missing ref from a
+ * strongly typed relation such as occurred_at -> location_state.
+ *
+ * This never imports refs from Memory OS graphOperations. It only repairs the
+ * semantic transaction's own create calls and only when the mapping is
+ * unambiguous. Ambiguous cases are left to normal transaction validation.
+ */
+function repairUnambiguousMissingSemanticRefs(calls = [], toolTypes = {}) {
+    const declaredRefs = new Set();
+    const unreferencedCreates = new Map();
+
+    for (const call of calls) {
+        if (call.name === FACT_TOOL_NAME || call.name === EXTRACT_DONE) continue;
+        const ref = call.args?.ref;
+        if (ref) declaredRefs.add(ref);
+
+        const spec = toolTypes[call.name];
+        if (spec?.op !== 'create' || !spec.type || ref) continue;
+        const candidates = unreferencedCreates.get(spec.type) || [];
+        candidates.push(call);
+        unreferencedCreates.set(spec.type, candidates);
+    }
+
+    const missingRefsByType = new Map();
+    for (const call of calls) {
+        if (call.name === FACT_TOOL_NAME || call.name === EXTRACT_DONE) continue;
+        const links = Array.isArray(call.args?.links) ? call.args.links : [];
+        for (const link of links) {
+            const ref = link?.target_ref;
+            if (!ref || declaredRefs.has(ref)) continue;
+            const targetType = RELATION_TARGET_SEMANTIC_TYPE[link?.relation];
+            if (!targetType) continue;
+            const refs = missingRefsByType.get(targetType) || new Set();
+            refs.add(ref);
+            missingRefsByType.set(targetType, refs);
+        }
+    }
+
+    const repairs = [];
+    for (const [type, refs] of missingRefsByType.entries()) {
+        const candidates = unreferencedCreates.get(type) || [];
+        if (refs.size !== 1 || candidates.length !== 1) continue;
+        const [ref] = refs;
+        if (declaredRefs.has(ref)) continue;
+
+        const call = candidates[0];
+        call.args = { ...(call.args || {}), ref };
+        declaredRefs.add(ref);
+        repairs.push({ name: call.name, type, ref });
+    }
+
+    return repairs;
+}
+
 /** Validate the whole staged batch, not just the most recent completion. */
 export function validateExtractTransaction({ calls = [], tools = [], requiredTypes = [], memoryOsEnabled = false, nodeIds = [], toolTypes = {} }) {
     const missing = [], duplicate = [], orderingErrors = [], malformed = [];
@@ -62,6 +133,7 @@ export function validateExtractTransaction({ calls = [], tools = [], requiredTyp
 /** Calls are staged only. The caller validates semantic effects and commits once. */
 export async function collectExtractTransaction({ send, tools, requiredTypes, memoryOsEnabled, nodeIds, taskMessages, repairContext, maxRepairs = 1, signal, initialCalls = [], toolTypes = {} }) {
     const calls = [...initialCalls];
+    repairUnambiguousMissingSemanticRefs(calls, toolTypes);
     let state = validateExtractTransaction({ calls, tools, requiredTypes, memoryOsEnabled, nodeIds, toolTypes });
     let emptyRetries = 0;
     let schemaRetries = 0;
@@ -114,9 +186,17 @@ export async function collectExtractTransaction({ send, tools, requiredTypes, me
         // staged safely: the malformed step is still missing, so done would violate
         // transaction ordering. Valid non-done calls are retained across the retry.
         calls.push(...(rejected.length ? accepted.filter(call => call.name !== EXTRACT_DONE) : accepted));
+        const semanticRefRepairs = repairUnambiguousMissingSemanticRefs(calls, toolTypes);
         state = validateExtractTransaction({ calls, tools, requiredTypes, memoryOsEnabled, nodeIds, toolTypes });
         validationErrors = rejected;
-        console.debug('[Memory Extract Protocol]', { round, required_event: requiredTypes.includes('event'), actual_calls: calls.map(call => call.name), rejected_calls: rejected, ...state });
+        console.debug('[Memory Extract Protocol]', {
+            round,
+            required_event: requiredTypes.includes('event'),
+            actual_calls: calls.map(call => call.name),
+            rejected_calls: rejected,
+            semantic_ref_repairs: semanticRefRepairs,
+            ...state,
+        });
 
         if (state.invalid) {
             // Duplicate writes and ordering violations are transaction-level
