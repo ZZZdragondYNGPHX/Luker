@@ -4601,7 +4601,7 @@ async function extractNodesWithLLM(context, store, settings, schema, messageBatc
         factContext += '\n' + temporalExtractionContext(options.memoryState ? projectTemporalGraph(options.memoryState, context.chat, { includeInactive: true }) : await sourceLifecycle.listGraph(context, { includeInactive: true }));
         if (options.memoryState) factContext += '\nHistory build: graph actions are limited to entity, alias, relation. Do not rename, merge, split or adjudicate identities. Do not modify user-corrected Facts; their IDs are: ' + JSON.stringify(Object.values(options.memoryState.facts || {}).filter(fact => fact.manualDisabled || fact.supports?.some(ref => ref.manualId)).map(fact => fact.id));
     }
-    const semanticRetries = Math.max(0, Math.min(10, Math.floor(Number(settings?.toolCallRetryMax) || 0)));
+    const semanticRetries = Math.max(1, Math.min(10, Math.floor(Number(settings?.toolCallRetryMax) || 0)));
     const editableNodes = new Map(
         listNodesByLevel(store, LEVEL.SEMANTIC)
             .filter((node) => {
