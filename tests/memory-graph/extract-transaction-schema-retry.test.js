@@ -239,6 +239,98 @@ describe('Memory OS extraction schema recovery', () => {
         expect(calls.at(-1).name).toBe(EXTRACT_DONE);
     });
 
+    test('repairs an exact-title location ref even when multiple locations were created without refs', async () => {
+        const tools = [LOCATION_TOOL, EVENT_TOOL, DONE_TOOL];
+        const calls = await collectExtractTransaction({
+            send: async () => [[
+                {
+                    name: LOCATION_TOOL.function.name,
+                    args: { title: '天界白色房间' },
+                },
+                {
+                    name: LOCATION_TOOL.function.name,
+                    args: { title: '阿克塞尔镇' },
+                },
+                {
+                    name: EVENT_TOOL.function.name,
+                    args: {
+                        summary: '时间: 2026-01-01 12:00\n地点: 天界白色房间\n\n谢开业准备转生。',
+                        ref: 'event_reincarnation',
+                        links: [{ target_ref: '天界白色房间', relation: 'occurred_at' }],
+                    },
+                },
+                doneCall(),
+            ]].shift(),
+            tools,
+            requiredTypes: ['event'],
+            memoryOsEnabled: false,
+            nodeIds: [],
+            taskMessages: [{ role: 'user', content: 'extract' }],
+            repairContext: 'source context',
+            maxRepairs: 1,
+            toolTypes: {
+                [LOCATION_TOOL.function.name]: { type: 'location_state', op: 'create' },
+                [EVENT_TOOL.function.name]: { type: 'event', op: 'create' },
+            },
+        });
+
+        const locations = calls.filter(call => call.name === LOCATION_TOOL.function.name);
+        expect(locations[0].args.ref).toBe('天界白色房间');
+        expect(locations[1].args.ref).toBeUndefined();
+        expect(calls.find(call => call.name === EVENT_TOOL.function.name)?.args.links)
+            .toEqual([{ target_ref: '天界白色房间', relation: 'occurred_at' }]);
+    });
+
+    test('retries missing required tool calls and upstream 524 without losing staged extraction calls', async () => {
+        const tools = [EVENT_TOOL, factExtractionTool(), DONE_TOOL];
+        const requests = [];
+        let responseIndex = 0;
+        const calls = await collectExtractTransaction({
+            initialCalls: [eventCall()],
+            send: async request => {
+                requests.push(request);
+                responseIndex += 1;
+                if (responseIndex === 1) {
+                    const error = new Error('Model response did not contain the required tool call.');
+                    error.code = 'tool_call_missing';
+                    throw error;
+                }
+                if (responseIndex === 2) {
+                    const error = new Error('ggchan.dev | 524: A timeout occurred');
+                    error.code = 'unknown';
+                    throw error;
+                }
+                if (responseIndex === 3) return [validFactsCall()];
+                return [doneCall()];
+            },
+            tools,
+            requiredTypes: ['event'],
+            memoryOsEnabled: true,
+            nodeIds: [],
+            taskMessages: [{ role: 'user', content: 'extract' }],
+            repairContext: {
+                EXTRACTING: 'source context',
+                MEMORY_FACTS_PENDING: 'fact context',
+                DONE_PENDING: '',
+            },
+            maxRepairs: 1,
+            toolTypes: {
+                [EVENT_TOOL.function.name]: { type: 'event', op: 'create' },
+            },
+        });
+
+        expect(calls.map(call => call.name)).toEqual([
+            EVENT_TOOL.function.name,
+            FACT_TOOL_NAME,
+            EXTRACT_DONE,
+        ]);
+        expect(requests).toHaveLength(4);
+        expect(requests[0].tools.map(tool => tool.function.name)).toEqual([FACT_TOOL_NAME]);
+        expect(requests[1].tools.map(tool => tool.function.name)).toEqual([FACT_TOOL_NAME]);
+        expect(requests[2].tools.map(tool => tool.function.name)).toEqual([FACT_TOOL_NAME]);
+        expect(requests[3].tools.map(tool => tool.function.name)).toEqual([EXTRACT_DONE]);
+    });
+
     test('drops cross-namespace semantic refs and repairs only the required missing event', async () => {
         const tools = [CHARACTER_TOOL, THREAD_TOOL, EVENT_TOOL, factExtractionTool(), DONE_TOOL];
         const responses = [
