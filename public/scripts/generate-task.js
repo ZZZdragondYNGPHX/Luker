@@ -901,7 +901,11 @@ function _wrapSenderError(error, abortSignal) {
         return error;
     }
     const msg = error?.message ? String(error.message) : String(error);
-    if (!abortSignal?.aborted && (error?.name === 'TimeoutError' || ['ETIMEDOUT', 'ESOCKETTIMEDOUT', 'UND_ERR_CONNECT_TIMEOUT', 'UND_ERR_HEADERS_TIMEOUT'].includes(error?.code))) {
+    if (!abortSignal?.aborted && (
+        error?.name === 'TimeoutError'
+        || ['ETIMEDOUT', 'ESOCKETTIMEDOUT', 'UND_ERR_CONNECT_TIMEOUT', 'UND_ERR_HEADERS_TIMEOUT'].includes(error?.code)
+        || (/\b524\b/.test(msg) && /timeout|timed out|a timeout occurred/i.test(msg))
+    )) {
         return new GenerateTaskError('timeout', 'Model request timed out.', { cause: error });
     }
     const isAbort = error?.name === 'AbortError'
@@ -919,8 +923,12 @@ function _wrapSenderError(error, abortSignal) {
     if (Number(error?.status) === 429 || /429|rate[ _-]?limit/i.test(msg)) {
         return new GenerateTaskError('rate_limit', `rate limited: ${msg}`, { cause: error });
     }
-    if (Number(error?.status) >= 500 && Number(error?.status) < 600) {
-        return new GenerateTaskError('network', `HTTP ${error.status}: ${msg}`, { cause: error });
+    if (
+        (Number(error?.status) >= 500 && Number(error?.status) < 600)
+        || (/\b(?:500|502|503|504|520|521|522|523|525|526)\b/.test(msg) && /cloudflare|server|http|error code/i.test(msg))
+    ) {
+        const status = Number(error?.status);
+        return new GenerateTaskError('network', Number.isFinite(status) && status >= 500 ? `HTTP ${status}: ${msg}` : `upstream server error: ${msg}`, { cause: error });
     }
     return new GenerateTaskError('unknown', `generateTask sender failed: ${msg}`, { cause: error });
 }
