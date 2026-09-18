@@ -1,5 +1,5 @@
 import { describe, expect, test } from '@jest/globals';
-import { collectExtractTransaction, EXTRACT_DONE } from '../../public/scripts/extensions/memory-graph/extract-transaction.js';
+import { collectExtractTransaction, EXTRACT_DONE, validateExtractTransaction } from '../../public/scripts/extensions/memory-graph/extract-transaction.js';
 import { factExtractionContext, factExtractionTool, FACT_TOOL_NAME } from '../../public/scripts/extensions/memory-graph/fact-extraction.js';
 
 const EVENT_TOOL = {
@@ -20,6 +20,42 @@ const EVENT_TOOL = {
     },
 };
 
+const CHARACTER_TOOL = {
+    type: 'function',
+    function: {
+        name: 'luker_rpg_extract_character_sheet_create',
+        parameters: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['title'],
+            properties: {
+                title: { type: 'string' },
+                ref: { type: 'string' },
+                links: { type: 'array', items: { type: 'object' } },
+            },
+        },
+    },
+};
+
+const THREAD_TOOL = {
+    type: 'function',
+    function: {
+        name: 'luker_rpg_extract_thread_create',
+        parameters: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['title', 'status', 'note'],
+            properties: {
+                title: { type: 'string' },
+                status: { type: 'string' },
+                note: { type: 'string' },
+                ref: { type: 'string' },
+                links: { type: 'array', items: { type: 'object' } },
+            },
+        },
+    },
+};
+
 const DONE_TOOL = {
     type: 'function',
     function: {
@@ -34,6 +70,20 @@ const eventCall = () => ({
 });
 const validFactsCall = () => ({ name: FACT_TOOL_NAME, args: { operations: [], graphOperations: [] } });
 const doneCall = () => ({ name: EXTRACT_DONE, args: {} });
+const graphRefFactsCall = () => ({
+    name: FACT_TOOL_NAME,
+    args: {
+        operations: [],
+        graphOperations: [{
+            action: 'entity',
+            ref: 'item_notebook',
+            name: '缄愿笔记',
+            type: 'Item',
+            evidence: [{ episodeId: 'ep:1', excerpt: '缄愿笔记' }],
+        }],
+    },
+});
+
 const legacyFactsCall = () => ({
     name: FACT_TOOL_NAME,
     args: {
@@ -91,6 +141,117 @@ describe('Memory OS extraction schema recovery', () => {
         expect(repairPrompt).toContain(FACT_TOOL_NAME);
     });
 
+    test('allows forward semantic refs declared later in the same transaction', () => {
+        const tools = [CHARACTER_TOOL, EVENT_TOOL, DONE_TOOL];
+        const calls = [
+            {
+                name: CHARACTER_TOOL.function.name,
+                args: {
+                    title: '谢开业',
+                    ref: 'char_xie',
+                    links: [{ target_ref: 'char_eris', relation: 'related' }],
+                },
+            },
+            {
+                name: CHARACTER_TOOL.function.name,
+                args: { title: '厄里斯', ref: 'char_eris', links: [] },
+            },
+            eventCall(),
+            doneCall(),
+        ];
+        const state = validateExtractTransaction({
+            calls,
+            tools,
+            requiredTypes: ['event'],
+            memoryOsEnabled: false,
+            nodeIds: [],
+            toolTypes: {
+                [CHARACTER_TOOL.function.name]: { type: 'character_sheet', op: 'create' },
+                [EVENT_TOOL.function.name]: { type: 'event', op: 'create' },
+            },
+        });
+
+        expect(state.malformed).toEqual([]);
+        expect(state.valid).toBe(true);
+    });
+
+    test('drops cross-namespace semantic refs and repairs only the required missing event', async () => {
+        const tools = [CHARACTER_TOOL, THREAD_TOOL, EVENT_TOOL, factExtractionTool(), DONE_TOOL];
+        const responses = [
+            [
+                {
+                    name: CHARACTER_TOOL.function.name,
+                    args: { title: '谢开业', ref: 'char_xie', links: [] },
+                },
+                {
+                    name: THREAD_TOOL.function.name,
+                    args: {
+                        title: '笔记代价',
+                        status: 'active',
+                        note: '等待代价显现。',
+                        ref: 'thread_bad',
+                        links: [{ target_ref: 'item_notebook', relation: 'mentions' }],
+                    },
+                },
+                {
+                    name: EVENT_TOOL.function.name,
+                    args: {
+                        summary: '时间: 2026-01-01 12:00\n地点: 阿克塞尔镇外\n\n谢开业抵达城门。',
+                        ref: 'event_bad',
+                        links: [
+                            { target_ref: 'char_xie', relation: 'involved_in' },
+                            { target_ref: 'thread_bad', relation: 'advances' },
+                            { target_ref: 'char_aqua', relation: 'mentions' },
+                        ],
+                    },
+                },
+                graphRefFactsCall(),
+                doneCall(),
+            ],
+            [{
+                name: EVENT_TOOL.function.name,
+                args: {
+                    summary: '时间: 2026-01-01 12:00\n地点: 阿克塞尔镇外\n\n谢开业抵达城门。',
+                    ref: 'event_fixed',
+                    links: [{ target_ref: 'char_xie', relation: 'involved_in' }],
+                },
+            }],
+            [doneCall()],
+        ];
+        const requests = [];
+
+        const calls = await collectExtractTransaction({
+            send: async request => {
+                requests.push(request);
+                return responses.shift() || [];
+            },
+            tools,
+            requiredTypes: ['event'],
+            memoryOsEnabled: true,
+            nodeIds: [],
+            taskMessages: [{ role: 'user', content: 'extract' }],
+            repairContext: 'source context',
+            maxRepairs: 1,
+            toolTypes: {
+                [CHARACTER_TOOL.function.name]: { type: 'character_sheet', op: 'create' },
+                [THREAD_TOOL.function.name]: { type: 'thread', op: 'create' },
+                [EVENT_TOOL.function.name]: { type: 'event', op: 'create' },
+            },
+        });
+
+        expect(calls.map(call => call.name)).toEqual([
+            CHARACTER_TOOL.function.name,
+            FACT_TOOL_NAME,
+            EVENT_TOOL.function.name,
+            EXTRACT_DONE,
+        ]);
+        expect(calls.some(call => call.args?.ref === 'thread_bad')).toBe(false);
+        expect(requests).toHaveLength(3);
+        expect(requests[1].taskMessages.at(-1).content).toContain('undeclared target_ref: item_notebook');
+        expect(requests[1].taskMessages.at(-1).content).toContain('undeclared target_ref: char_aqua');
+        expect(requests[1].taskMessages.at(-1).content).toContain('validation_errors');
+    });
+
     test('fact extraction prompt names the current provenance fields and rejects legacy output keys', () => {
         const prompt = factExtractionContext({
             sources: [{ episodeId: 'ep:1', content: '谢开业抵达阿克塞尔镇。', role: 'assistant' }],
@@ -98,6 +259,9 @@ describe('Memory OS extraction schema recovery', () => {
 
         expect(prompt).toContain('source_episodes is evidence only');
         expect(prompt).toContain('evidence: [{episodeId, excerpt}]');
+        expect(prompt).toContain('exact contiguous substring');
+        expect(prompt).toContain('graphOperations refs are private');
+        expect(prompt).toContain('factIndex');
         expect(prompt).toContain('Do not emit legacy keys content, tags, source_episodes, schema, or data');
         expect(prompt).toContain('never use legacy {type, schema, data} wrappers');
     });
