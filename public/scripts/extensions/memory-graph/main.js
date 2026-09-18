@@ -3432,6 +3432,12 @@ async function requestToolCallsWithRetry(context, settings, {
     const allowedSet = Array.isArray(allowedNames)
         ? new Set(allowedNames.map(name => String(name || '').trim()).filter(Boolean))
         : (allowedNames instanceof Set ? allowedNames : null);
+    const singleRequiredName = extractionControl && tools.length === 1
+        ? String(tools[0]?.function?.name || '').trim()
+        : '';
+    const extractionToolChoice = singleRequiredName
+        ? { type: 'function', function: { name: singleRequiredName } }
+        : 'required';
     let lastError = null;
     for (let attempt = 0; attempt <= retries; attempt++) {
         const requestController = createLinkedAbortController(isAbortSignalLike(abortSignal) ? abortSignal : null);
@@ -3448,10 +3454,11 @@ async function requestToolCallsWithRetry(context, settings, {
                 apiPresetName: String(apiPresetName || '').trim(),
                 llmPresetName: String(llmPresetName || '').trim(),
                 tools,
-                toolChoice: extractionControl ? 'required' : 'auto',
+                toolChoice: extractionControl ? extractionToolChoice : 'auto',
                 functionCallMode: 'auto',
                 functionCallOptions: {
                     protocolStyle: TOOL_PROTOCOL_STYLE.JSON_SCHEMA,
+                    ...(singleRequiredName ? { requiredFunctionName: singleRequiredName } : {}),
                 },
                 abortSignal: requestController.signal,
             };
@@ -3460,10 +3467,17 @@ async function requestToolCallsWithRetry(context, settings, {
                 result = await context.generateTask(generateTaskOpts);
             } catch (error) {
                 const unsupported = /tool[_ ]choice/i.test(error?.message || '') && /unsupported|not supported|does not support/i.test(error?.message || '');
-                if (!extractionControl || !unsupported || isAbortError(error, abortSignal)) throw error;
-                // Explicit capability rejection only: use the existing tool
-                // protocol adapter, still requiring schema-validated calls.
-                console.warn('[Memory Extract Capability] Native required tool_choice unsupported; using prompt_xml.');
+                const missingRequiredCall = error?.code === 'tool_call_missing';
+                if (!extractionControl || (!unsupported && !missingRequiredCall) || isAbortError(error, abortSignal)) throw error;
+                // Some OpenAI-compatible Gemini routes accept native tool_choice
+                // but occasionally return finish_reason=stop with no tool call.
+                // Fall back to the prompt protocol for that response only; the
+                // transaction layer still schema-validates every parsed call.
+                console.warn(
+                    missingRequiredCall
+                        ? '[Memory Extract Capability] Native required tool call was ignored; retrying with prompt_xml.'
+                        : '[Memory Extract Capability] Native required tool_choice unsupported; using prompt_xml.',
+                );
                 result = await context.generateTask({ ...generateTaskOpts, functionCallMode: 'prompt_xml' });
             }
             throwIfRecallRunInvalid(recallRunToken, abortSignal, 'Memory recall aborted.');
