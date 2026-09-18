@@ -59,19 +59,51 @@ function repairUnambiguousMissingSemanticRefs(calls = [], toolTypes = {}) {
     }
 
     const repairs = [];
-    for (const [type, refs] of missingRefsByType.entries()) {
-        const candidates = unreferencedCreates.get(type) || [];
-        if (refs.size !== 1 || candidates.length !== 1) continue;
-        const [ref] = refs;
-        if (declaredRefs.has(ref)) continue;
+    const assignedCalls = new Set();
+    const normalize = value => String(value || '').trim().toLowerCase();
+    const callNames = call => {
+        const values = [call?.args?.title];
+        const aliases = String(call?.args?.aliases || '')
+            .split(/[,，;；|]/g)
+            .map(value => value.trim())
+            .filter(Boolean);
+        return new Set([...values, ...aliases].map(normalize).filter(Boolean));
+    };
 
-        const call = candidates[0];
-        call.args = { ...(call.args || {}), ref };
-        declaredRefs.add(ref);
-        repairs.push({ name: call.name, type, ref });
+    for (const [type, refs] of missingRefsByType.entries()) {
+        const candidates = (unreferencedCreates.get(type) || []).filter(call => !assignedCalls.has(call));
+        for (const ref of refs) {
+            if (declaredRefs.has(ref)) continue;
+            const refKey = normalize(ref);
+            const exactMatches = candidates.filter(call => !assignedCalls.has(call) && callNames(call).has(refKey));
+            let call = exactMatches.length === 1 ? exactMatches[0] : null;
+
+            // If the model invented an opaque ref (for example loc_axel) rather
+            // than reusing a title, recover it only when this target type has one
+            // missing ref and exactly one compatible unreferenced create.
+            if (!call && refs.size === 1) {
+                const remaining = candidates.filter(candidate => !assignedCalls.has(candidate));
+                if (remaining.length === 1) call = remaining[0];
+            }
+            if (!call) continue;
+
+            call.args = { ...(call.args || {}), ref };
+            assignedCalls.add(call);
+            declaredRefs.add(ref);
+            repairs.push({ name: call.name, type, ref });
+        }
     }
 
     return repairs;
+}
+
+function isRetryableExtractionRequestError(error) {
+    const code = String(error?.code || '').trim();
+    if (new Set(['tool_call_parse', 'tool_call_missing', 'no_response', 'timeout', 'network', 'rate_limit']).has(code)) {
+        return true;
+    }
+    const message = String(error?.message || error || '');
+    return /\b(?:500|502|503|504|520|521|522|523|524|525|526)\b|timeout|timed out|rate[ _-]?limit|no tool call|empty content/i.test(message);
 }
 
 /** Validate the whole staged batch, not just the most recent completion. */
@@ -135,14 +167,16 @@ export async function collectExtractTransaction({ send, tools, requiredTypes, me
     const calls = [...initialCalls];
     repairUnambiguousMissingSemanticRefs(calls, toolTypes);
     let state = validateExtractTransaction({ calls, tools, requiredTypes, memoryOsEnabled, nodeIds, toolTypes });
-    let emptyRetries = 0;
+    let transientRetries = 0;
     let schemaRetries = 0;
     let protocolRetries = 0;
     let validationErrors = [];
-    const maxRounds = requiredTypes.length + 3 + (maxRepairs * 2);
+    let repairMode = initialCalls.length > 0;
+    const maxTransientRetries = Math.max(2, maxRepairs);
+    const maxRounds = requiredTypes.length + 3 + (maxRepairs * 2) + maxTransientRetries;
     for (let round = 0; round < maxRounds; round++) {
         if (signal?.aborted) throw new DOMException('Memory extraction aborted', 'AbortError');
-        const repair = round > 0 || initialCalls.length > 0;
+        const repair = repairMode;
         const allowed = !repair ? tools : tools.filter(tool => {
             const name = tool.function.name;
             if (state.phase === 'MEMORY_FACTS_PENDING') return name === FACT_TOOL_NAME;
@@ -161,15 +195,31 @@ export async function collectExtractTransaction({ send, tools, requiredTypes, me
         try {
             next = await send({ tools: allowed, taskMessages: messages, repair, phase: state.phase, round });
         } catch (error) {
-            if (error?.code !== 'tool_call_parse' || ++emptyRetries > maxRepairs || signal?.aborted) throw error;
+            if (signal?.aborted || !isRetryableExtractionRequestError(error) || ++transientRetries > maxTransientRetries) throw error;
+            validationErrors = [{
+                name: null,
+                reason: `${String(error?.code || 'transient_request_error')}: ${String(error?.message || error || 'request failed')}`,
+            }];
+            console.warn('[Memory Extract Protocol] transient request failure; retrying current phase.', {
+                phase: state.phase,
+                attempt: transientRetries,
+                max: maxTransientRetries,
+                code: error?.code || null,
+            });
             continue;
         }
-        if (!next.length && ++emptyRetries > maxRepairs) {
-            const error = new Error('Extraction returned no tool calls. No new memory was written.');
-            error.code = 'memory_extract_protocol';
-            error.details = state;
-            throw error;
+        if (!Array.isArray(next) || next.length === 0) {
+            if (++transientRetries > maxTransientRetries) {
+                const error = new Error('Extraction returned no tool calls after retry. No new memory was written.');
+                error.code = 'memory_extract_protocol';
+                error.details = state;
+                throw error;
+            }
+            validationErrors = [{ name: null, reason: 'tool_call_missing: extraction returned no tool calls' }];
+            continue;
         }
+        transientRetries = 0;
+        repairMode = true;
 
         const accepted = [];
         const rejected = [];
