@@ -37,6 +37,24 @@ const CHARACTER_TOOL = {
     },
 };
 
+const LOCATION_TOOL = {
+    type: 'function',
+    function: {
+        name: 'luker_rpg_extract_location_state_create',
+        parameters: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['title'],
+            properties: {
+                title: { type: 'string' },
+                aliases: { type: 'string' },
+                ref: { type: 'string' },
+                links: { type: 'array', items: { type: 'object' } },
+            },
+        },
+    },
+};
+
 const THREAD_TOOL = {
     type: 'function',
     function: {
@@ -173,6 +191,52 @@ describe('Memory OS extraction schema recovery', () => {
 
         expect(state.malformed).toEqual([]);
         expect(state.valid).toBe(true);
+    });
+
+    test('repairs an omitted location ref from an unambiguous occurred_at link', async () => {
+        const tools = [LOCATION_TOOL, EVENT_TOOL, factExtractionTool(), DONE_TOOL];
+        const responses = [[
+            graphRefFactsCall(),
+            {
+                name: LOCATION_TOOL.function.name,
+                args: { title: '阿克塞尔', aliases: 'Axel, 阿克塞尔镇' },
+            },
+            {
+                name: EVENT_TOOL.function.name,
+                args: {
+                    summary: '时间: 2026-01-01 12:00\n地点: 阿克塞尔镇外\n\n谢开业抵达城门。',
+                    ref: 'event_transfer',
+                    links: [{ target_ref: 'loc_axel', relation: 'occurred_at' }],
+                },
+            },
+            doneCall(),
+        ]];
+        const requests = [];
+
+        const calls = await collectExtractTransaction({
+            send: async request => {
+                requests.push(request);
+                return responses.shift() || [];
+            },
+            tools,
+            requiredTypes: ['event'],
+            memoryOsEnabled: true,
+            nodeIds: [],
+            taskMessages: [{ role: 'user', content: 'extract' }],
+            repairContext: 'source context',
+            maxRepairs: 1,
+            toolTypes: {
+                [LOCATION_TOOL.function.name]: { type: 'location_state', op: 'create' },
+                [EVENT_TOOL.function.name]: { type: 'event', op: 'create' },
+            },
+        });
+
+        expect(requests).toHaveLength(1);
+        const locationCall = calls.find(call => call.name === LOCATION_TOOL.function.name);
+        const event = calls.find(call => call.name === EVENT_TOOL.function.name);
+        expect(locationCall.args.ref).toBe('loc_axel');
+        expect(event.args.links).toEqual([{ target_ref: 'loc_axel', relation: 'occurred_at' }]);
+        expect(calls.at(-1).name).toBe(EXTRACT_DONE);
     });
 
     test('drops cross-namespace semantic refs and repairs only the required missing event', async () => {
