@@ -59,7 +59,7 @@ describe('production extraction dispatch with simulated model responses', () => 
         const builder = createHistory();
         const result = await builder.run(context, { floors: [0, 1, 2, 3, 4, 5, 6] });
         expect(result.errors).toEqual([]); expect(result.status).toBe('completed');
-        expect(context.generateTask).toHaveBeenCalledTimes(2);
+        expect(context.generateTask).toHaveBeenCalledTimes(3);
         const tail = context.generateTask.mock.calls[1][0].taskMessages.at(-1).content;
         expect(tail).toContain('"canonicalName":"Roland"');
         expect(Object.values(disk.get('memory_graph__provenance').entities)).toHaveLength(2);
@@ -131,7 +131,14 @@ describe('seq=1 uninitialized event extraction transaction', () => {
         const store = createEmptyStore();
         context.generateTask = jest.fn(async request => {
             expect(Object.values(store.nodes || {})).toHaveLength(0);
-            expect(request.stream).toBe(false); expect(request.toolChoice).toBe('required');
+            expect(request.stream).toBe(false);
+            const requestToolNames = request.tools.map(tool => tool.function.name);
+            if (requestToolNames.length === 1) {
+                expect(request.toolChoice).toEqual({ type: 'function', function: { name: requestToolNames[0] } });
+                expect(request.functionCallOptions?.requiredFunctionName).toBe(requestToolNames[0]);
+            } else {
+                expect(request.toolChoice).toBe('required');
+            }
             expect(request.promptMode).toBe('task'); expect(request.includeCharacterCard).toBe(false);
             expect(JSON.stringify(request.taskMessages)).not.toContain('<thought>');
             return { toolCalls: responses.shift() };
