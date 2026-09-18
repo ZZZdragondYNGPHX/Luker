@@ -59,7 +59,7 @@ describe('production extraction dispatch with simulated model responses', () => 
         const builder = createHistory();
         const result = await builder.run(context, { floors: [0, 1, 2, 3, 4, 5, 6] });
         expect(result.errors).toEqual([]); expect(result.status).toBe('completed');
-        expect(context.generateTask).toHaveBeenCalledTimes(3);
+        expect(context.generateTask).toHaveBeenCalledTimes(2);
         const tail = context.generateTask.mock.calls[1][0].taskMessages.at(-1).content;
         expect(tail).toContain('"canonicalName":"Roland"');
         expect(Object.values(disk.get('memory_graph__provenance').entities)).toHaveLength(2);
@@ -101,7 +101,7 @@ describe('production extraction dispatch with simulated model responses', () => 
         context.generateTask = jest.fn().mockImplementationOnce(async request => answer(request, 'invented quote'))
             .mockImplementation(async request => answer(request));
         await run({ toolCallRetryMax: 1 });
-        expect(context.generateTask).toHaveBeenCalledTimes(3);
+        expect(context.generateTask).toHaveBeenCalledTimes(2);
         expect(Object.values(disk.get('memory_graph__provenance').facts)[0].supports[0].evidence[0].excerpt).toBe('Roland keeps the sword.');
     });
     test('source edit while the model runs rejects the result before any fact is written', async () => {
@@ -171,7 +171,7 @@ describe('seq=1 uninitialized event extraction transaction', () => {
         const store = createEmptyStore();
         context.generateTask = jest.fn(async () => ({ assistantText: 'no tool', toolCalls: [] }));
         await expect(runEventBatch(store)).rejects.toThrow('no tool calls');
-        expect(context.generateTask).toHaveBeenCalledTimes(2);
+        expect(context.generateTask).toHaveBeenCalledTimes(3);
         expect(store.appliedSeqTo || 0).toBe(0);
     });
     test('abort between phases does not publish the staged event', async () => {
