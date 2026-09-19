@@ -174,6 +174,13 @@ export function getActivePresetId(settings, mode, { scope = 'global', context, a
 export function setActivePresetId(settings, mode, scope, presetId, { context, avatar } = {}) {
     const c = getScopeContainer(settings, scope, { context, avatar });
     if (!c) return false;
+    if (scope === 'character' && presetId === '') {
+        // Single-scope model: an empty card slot means "run the global
+        // active preset". The library itself is preserved so the user can
+        // switch back without rebuilding it.
+        c.activeIds[mode] = '';
+        return true;
+    }
     if (!presetId || !c.libraries[mode]?.[presetId]) return false;
     c.activeIds[mode] = String(presetId);
     return true;
