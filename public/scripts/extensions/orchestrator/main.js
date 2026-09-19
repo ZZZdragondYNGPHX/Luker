@@ -2417,7 +2417,7 @@ async function persistCopiedProfileTarget(context, settings, mode, scope) {
                 return false;
             }
             const ok = await persistCharacterAgendaEditor(context, settings, avatar, {
-                editor: uiState.characterAgendaEditor
+                editor: uiState.characterAgendaEditor,
             });
             if (!ok) {
                 notifyError(i18n('Failed to persist character override.'));
@@ -2443,7 +2443,7 @@ async function persistCopiedProfileTarget(context, settings, mode, scope) {
             return false;
         }
         const ok = await persistCharacterEditor(context, settings, avatar, {
-            editor: uiState.characterEditor
+            editor: uiState.characterEditor,
         });
         if (!ok) {
             notifyError(i18n('Failed to persist character override.'));
@@ -2627,17 +2627,15 @@ function isDirectorIterationSession(session) {
 }
 
 /**
- * Dispatch helper for "does this character have an override for the mode
- * the iteration popup is currently editing?". Used by the iter popup to
- * decide whether to inject the "scope hint" system-prompt addendum that
- * tells the AI it's starting from a seeded global copy rather than an
- * existing override.
- */
+  * Dispatch helper for "does this card run its own preset for the mode
+  * the iteration popup is currently editing?" (single-scope model: the
+  * card's active slot is non-empty). Used by the iter popup to decide
+  * whether to inject the "scope hint" system-prompt addendum that tells
+  * the AI it's starting from a seeded global copy rather than an
+  * existing card preset.
+  */
 function hasCharacterOverrideForCurrentMode(context, avatar, mode) {
-    if (mode === ORCH_EXECUTION_MODE_DIRECTOR) return hasCharacterDirectorOverride(context, avatar);
-    if (mode === ORCH_EXECUTION_MODE_LOOP) return hasCharacterLoopOverride(context, avatar);
-    if (mode === ORCH_EXECUTION_MODE_AGENDA) return hasCharacterAgendaOverride(context, avatar);
-    return hasCharacterSpecOverride(context, avatar);
+    return getRuntimePresetScope(context, avatar, mode) === 'character';
 }
 
 // Director profile is stored at settings.presetLibraries.director (global)
@@ -6391,7 +6389,7 @@ async function applyAiIterationSessionToCharacter(context, settings, session, ro
             return;
         }
         const ok = await persistCharacterLoopEditor(context, settings, avatar, {
-            editor: importedEditor
+            editor: importedEditor,
         });
         if (!ok) {
             notifyError(i18n('Failed to persist character override.'));
@@ -6434,7 +6432,7 @@ async function applyAiIterationSessionToCharacter(context, settings, session, ro
             return;
         }
         const ok = await persistCharacterAgendaEditor(context, settings, avatar, {
-            editor: importedEditor
+            editor: importedEditor,
         });
         if (!ok) {
             notifyError(i18n('Failed to persist character override.'));
@@ -6477,7 +6475,7 @@ async function applyAiIterationSessionToCharacter(context, settings, session, ro
             return;
         }
         const ok = await persistCharacterDirectorEditor(context, settings, avatar, {
-            editor: importedEditor
+            editor: importedEditor,
         });
         if (!ok) {
             notifyError(i18n('Failed to persist character override.'));
@@ -6524,7 +6522,7 @@ async function applyAiIterationSessionToCharacter(context, settings, session, ro
     const ok = await persistCharacterEditor(context, settings, avatar, {
         editor: {
             ...importedEditor,
-        }
+        },
     });
     if (!ok) {
         notifyError(i18n('Failed to persist character override.'));
@@ -8304,19 +8302,19 @@ function bindUi() {
             let ok;
             if (executionMode === ORCH_EXECUTION_MODE_LOOP) {
                 ok = await persistCharacterLoopEditor(context, settings, activeAvatar, {
-                    editor: getLoopEditorByScope(sourceScope)
+                    editor: getLoopEditorByScope(sourceScope),
                 });
             } else if (executionMode === ORCH_EXECUTION_MODE_AGENDA) {
                 ok = await persistCharacterAgendaEditor(context, settings, activeAvatar, {
-                    editor: getAgendaEditorByScope(sourceScope)
+                    editor: getAgendaEditorByScope(sourceScope),
                 });
             } else if (executionMode === ORCH_EXECUTION_MODE_DIRECTOR) {
                 ok = await persistCharacterDirectorEditor(context, settings, activeAvatar, {
-                    editor: getDirectorEditorByScope(sourceScope)
+                    editor: getDirectorEditorByScope(sourceScope),
                 });
             } else {
                 ok = await persistCharacterEditor(context, settings, activeAvatar, {
-                    editor: getEditorByScope(sourceScope)
+                    editor: getEditorByScope(sourceScope),
                 });
             }
             if (!ok) {
