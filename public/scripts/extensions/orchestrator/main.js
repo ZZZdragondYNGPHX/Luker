@@ -150,24 +150,17 @@ import {
 import {
     applyCharacterExecutionModeForAvatar,
     clearCharacterExtensionForMode,
-    getCharacterAgendaOverrideByAvatar,
-    getCharacterDirectorOverrideByAvatar,
+    getCharacterActivePresetId,
     getCharacterDisplayNameByAvatar,
     getCharacterExtensionDataByAvatar,
     getCharacterIndexByAvatar,
-    getCharacterLoopOverrideByAvatar,
-    getCharacterOverrideByAvatar,
     getCharacterPresetLibrary,
     getExecutionMode,
-    hasCharacterAgendaOverride,
+    getRuntimePresetScope,
     hasCharacterAgendaPresetLibrary,
-    hasCharacterDirectorOverride,
     hasCharacterDirectorPresetLibrary,
-    hasCharacterLoopOverride,
     hasCharacterLoopPresetLibrary,
-    hasCharacterSpecOverride,
     hasCharacterSpecPresetLibrary,
-    isCharacterPresetActiveOverrideEnabled,
     normalizeExecutionMode,
 } from './character-overrides.js';
 import {
@@ -354,11 +347,13 @@ registerExtensionApi(MODULE_NAME, {
     bridgeSillyTavernTool,
     unbridgeSillyTavernTool,
     listAvailableSillyTavernTools,
-    // Per-character override accessors (character-overrides.js). Plugins
-    // that want to read or pin a character's orchestration override go
-    // through this surface — direct ES-module import from a sibling
-    // plugin is forbidden by the plugin↔plugin boundary rule.
-    getCharacterOverrideByAvatar,
+    // Per-character preset accessors (character-overrides.js). Plugins
+    // that want to read a character's orchestration preset state or pin
+    // its saved execution mode go through this surface — direct
+    // ES-module import from a sibling plugin is forbidden by the
+    // plugin↔plugin boundary rule.
+    getRuntimePresetScope,
+    getCharacterActivePresetId,
     getCharacterIndexByAvatar,
     getCharacterExtensionDataByAvatar,
     applyCharacterExecutionModeForAvatar,
@@ -805,8 +800,9 @@ export function getEffectiveProfile(context) {
         };
     }
 
-    const useCard = Boolean(avatar)
-        && isCharacterPresetActiveOverrideEnabled(context, avatar, executionMode);
+    // Single-scope model: the card's active slot decides. Non-empty slot
+    // → run the card library; empty → run the global active preset.
+    const useCard = getRuntimePresetScope(context, avatar, executionMode) === 'character';
     const scope = useCard ? 'character' : 'global';
     // `getActivePreset` returns `{ok:true, state}` envelope after Task 4.1;
     // `state` is null when no preset is configured (legitimate success).
@@ -1705,11 +1701,8 @@ function getOrchestratorUiTemplateDeps() {
         escapeHtml,
         extension_prompt_roles,
         getAgendaEditorByScope,
-        getCharacterAgendaOverrideByAvatar,
-        getCharacterDirectorOverrideByAvatar,
+        getCharacterActivePresetId,
         getCharacterDisplayNameByAvatar,
-        getCharacterLoopOverrideByAvatar,
-        getCharacterOverrideByAvatar,
         getContext,
         getCurrentAvatar,
         getDirectorEditorByScope,
@@ -1721,13 +1714,10 @@ function getOrchestratorUiTemplateDeps() {
         getLoopEditorByScope,
         getPopupEditingLabel,
         getProfileTitleForScope,
-        hasCharacterAgendaOverride,
+        getRuntimePresetScope,
         hasCharacterAgendaPresetLibrary,
-        hasCharacterDirectorOverride,
         hasCharacterDirectorPresetLibrary,
-        hasCharacterLoopOverride,
         hasCharacterLoopPresetLibrary,
-        hasCharacterSpecOverride,
         hasCharacterSpecPresetLibrary,
         i18n,
         initializeUiState,

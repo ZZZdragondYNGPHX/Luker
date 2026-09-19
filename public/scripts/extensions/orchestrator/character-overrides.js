@@ -243,12 +243,74 @@ export function getCharacterPresetLibrary(context, avatar, mode) {
 }
 
 export function getCharacterActivePresetId(context, avatar, mode) {
+    // Single-scope model: read the card's own active slot strictly. No
+    // first-key fallback — an empty slot is the explicit "run the global
+    // active preset" state, and resurrecting the first library entry
+    // here would override that choice on every read.
     const ext = getCharacterExtensionDataByAvatar(context, avatar) || {};
-    const fromNew = ext.activePresetIds?.[mode];
-    if (fromNew && ext.presetLibraries?.[mode]?.[fromNew]) return String(fromNew);
-    const lib = getCharacterPresetLibrary(context, avatar, mode);
-    const firstKey = Object.keys(lib)[0];
-    return firstKey || '';
+    const id = ext.activePresetIds?.[mode];
+    if (id && ext.presetLibraries?.[mode]?.[id]) return String(id);
+    return '';
+}
+
+/**
+ * One-time migration: consume the legacy `overrideEnabled.<mode>` flags
+ * and settle each mode's active slot accordingly, then drop the flag
+ * field entirely.
+ *
+ * - `true` keeps the slot (filling it with the library's first key when
+ *   empty, preserving the "override was on" intent).
+ * - `false` clears the slot (the card falls back to the global active).
+ *
+ * Returns true when the card was mutated, so callers can persist.
+ */
+export function migrateCardOverrideEnabledFlags(context, avatar) {
+    const ext = getCharacterExtensionDataByAvatar(context, avatar) || {};
+    const flags = ext?.overrideEnabled;
+    if (!flags || typeof flags !== 'object') return false;
+    if (!ext.activePresetIds || typeof ext.activePresetIds !== 'object') {
+        ext.activePresetIds = { spec: '', agenda: '', loop: '', director: '' };
+    }
+    for (const mode of ['spec', 'agenda', 'loop', 'director']) {
+        if (typeof flags[mode] !== 'boolean') continue;
+        if (flags[mode]) {
+            const lib = ext.presetLibraries?.[mode];
+            if (!ext.activePresetIds[mode] && lib && Object.keys(lib).length > 0) {
+                ext.activePresetIds[mode] = Object.keys(lib)[0];
+            }
+        } else {
+            ext.activePresetIds[mode] = '';
+        }
+    }
+    delete ext.overrideEnabled;
+    return true;
+}
+
+/**
+ * Which library runs for this (avatar, mode) under the single-scope
+ * model: the card's active slot when it holds a real preset id, else
+ * the global active. Runs both lazy migrations first so freshly
+ * imported legacy cards settle before the read.
+ */
+export function getRuntimePresetScope(context, avatar, mode) {
+    const safeAvatar = String(avatar || '').trim();
+    if (!safeAvatar) return 'global';
+    // Flag migration runs FIRST: an explicit new-shape `overrideEnabled`
+    // flag wins over the legacy `override.<mode>` payload. Running the
+    // legacy migration first would let a stale legacy `enabled:true`
+    // re-seed the flag container after the user's explicit `false` was
+    // consumed, resurrecting a slot the user cleared.
+    migrateCardOverrideEnabledFlags(context, safeAvatar);
+    const ext = getCharacterExtensionDataByAvatar(context, safeAvatar) || {};
+    if (hasLegacyOverridePayload(ext, mode)) {
+        migrateAndPersistLegacyCardOverrideForMode(context, safeAvatar, mode);
+        // The legacy migration translates `override.<mode>.enabled` into
+        // a fresh flag container — consume it in the same pass so the
+        // slot settles before the read.
+        migrateCardOverrideEnabledFlags(context, safeAvatar);
+    }
+    const id = getCharacterActivePresetId(context, safeAvatar, mode);
+    return id ? 'character' : 'global';
 }
 
 /**

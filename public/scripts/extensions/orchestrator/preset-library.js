@@ -250,7 +250,15 @@ export function migrateLegacyCardOverrideForMode(context, avatar, mode) {
             ext.overrideEnabled = {};
         }
         if (typeof ext.overrideEnabled[mode] !== 'boolean') {
-            ext.overrideEnabled[mode] = legacyEnabled;
+            // Only seed the flag when the slot says the override was
+            // actually live. A legacy payload with enabled=true can sit
+            // on a card whose active slot was explicitly cleared (the
+            // single-scope "run global" choice) — re-seeding the flag
+            // here would resurrect that cleared slot on the next flag
+            // migration.
+            if (ext.activePresetIds[mode]) {
+                ext.overrideEnabled[mode] = legacyEnabled;
+            }
         }
     }
     // Strip the legacy fields we just consumed so the next render does
