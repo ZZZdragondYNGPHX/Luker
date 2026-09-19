@@ -134,12 +134,6 @@ function clonePreviousLibrariesAndIds(previous) {
     return { libraries, activeIds };
 }
 
-function clonePreviousEnabledFlags(previous) {
-    return previous?.overrideEnabled && typeof previous.overrideEnabled === 'object'
-        ? structuredClone(previous.overrideEnabled)
-        : {};
-}
-
 function writeModeLibrarySlot(libraries, activeIds, mode, sanitizedPayload) {
     if (!libraries[mode] || Object.keys(libraries[mode]).length === 0) {
         libraries[mode] = { default: { name: 'Default', ...sanitizedPayload } };
@@ -174,10 +168,7 @@ function nextOverridePin(previous, mode) {
     return previousOverride;
 }
 
-export async function persistCharacterEditor(context, settings, avatar, {
-    editor,
-    forceEnabled = null,
-} = {}) {
+export async function persistCharacterEditor(context, settings, avatar, { editor } = {}) {
     void settings;
     const target = String(avatar || '');
     if (!target) {
@@ -189,33 +180,25 @@ export async function persistCharacterEditor(context, settings, avatar, {
     }
 
     ensureEditorIntegrity(editor);
-    const sourceEnabled = typeof editor?.enabled === 'boolean' ? editor.enabled : true;
-    const enabledFlag = forceEnabled === null ? Boolean(sourceEnabled) : Boolean(forceEnabled);
 
     const previous = getCharacterExtensionDataByAvatar(context, target);
     const { libraries, activeIds } = clonePreviousLibrariesAndIds(previous);
-    const overrideEnabled = clonePreviousEnabledFlags(previous);
 
     writeModeLibrarySlot(libraries, activeIds, ORCH_EXECUTION_MODE_SPEC, {
         spec: serializeEditorSpec(editor.spec),
         presets: serializeEditorPresetMap(editor.presets),
     });
-    overrideEnabled[ORCH_EXECUTION_MODE_SPEC] = enabledFlag;
 
     const nextPayload = {
         ...previous,
         override: nextOverridePin(previous, ORCH_EXECUTION_MODE_SPEC),
         presetLibraries: libraries,
         activePresetIds: activeIds,
-        overrideEnabled,
     };
     return await persistOrchestratorCharacterExtension(context, characterIndex, nextPayload);
 }
 
-export async function persistCharacterAgendaEditor(context, settings, avatar, {
-    editor,
-    forceEnabled = null,
-} = {}) {
+export async function persistCharacterAgendaEditor(context, settings, avatar, { editor } = {}) {
     void settings;
     const target = String(avatar || '');
     if (!target) {
@@ -227,23 +210,18 @@ export async function persistCharacterAgendaEditor(context, settings, avatar, {
     }
 
     ensureAgendaEditorIntegrity(editor);
-    const sourceEnabled = typeof editor?.enabled === 'boolean' ? editor.enabled : true;
-    const enabledFlag = forceEnabled === null ? Boolean(sourceEnabled) : Boolean(forceEnabled);
 
     const previous = getCharacterExtensionDataByAvatar(context, target);
     const { libraries, activeIds } = clonePreviousLibrariesAndIds(previous);
-    const overrideEnabled = clonePreviousEnabledFlags(previous);
 
     writeModeLibrarySlot(libraries, activeIds, ORCH_EXECUTION_MODE_AGENDA,
         sanitizeAgendaWorkingProfile(editor));
-    overrideEnabled[ORCH_EXECUTION_MODE_AGENDA] = enabledFlag;
 
     const nextPayload = {
         ...previous,
         override: nextOverridePin(previous, ORCH_EXECUTION_MODE_AGENDA),
         presetLibraries: libraries,
         activePresetIds: activeIds,
-        overrideEnabled,
     };
     return await persistOrchestratorCharacterExtension(context, characterIndex, nextPayload);
 }
@@ -260,10 +238,7 @@ export async function persistCharacterAgendaEditor(context, settings, avatar, {
  * draft. The preset entry's `name` is preserved across the rewrite; if
  * the card has no library yet, a `default` slot is synthesized.
  */
-export async function persistCharacterLoopEditor(context, settings, avatar, {
-    editor,
-    forceEnabled = null,
-} = {}) {
+export async function persistCharacterLoopEditor(context, settings, avatar, { editor } = {}) {
     void settings;
     const target = String(avatar || '');
     if (!target) {
@@ -274,22 +249,16 @@ export async function persistCharacterLoopEditor(context, settings, avatar, {
         return false;
     }
 
-    const sourceEnabled = typeof editor?.enabled === 'boolean' ? editor.enabled : true;
-    const enabledFlag = forceEnabled === null ? Boolean(sourceEnabled) : Boolean(forceEnabled);
-
     const previous = getCharacterExtensionDataByAvatar(context, target);
     const { libraries, activeIds } = clonePreviousLibrariesAndIds(previous);
-    const overrideEnabled = clonePreviousEnabledFlags(previous);
 
     writeModeLibrarySlot(libraries, activeIds, ORCH_EXECUTION_MODE_LOOP, sanitizeLoopProfile(editor));
-    overrideEnabled[ORCH_EXECUTION_MODE_LOOP] = enabledFlag;
 
     const nextPayload = {
         ...previous,
         override: nextOverridePin(previous, ORCH_EXECUTION_MODE_LOOP),
         presetLibraries: libraries,
         activePresetIds: activeIds,
-        overrideEnabled,
     };
     return await persistOrchestratorCharacterExtension(context, characterIndex, nextPayload);
 }
@@ -307,10 +276,7 @@ export async function persistCharacterLoopEditor(context, settings, avatar, {
  * persisted (no editor passthrough like avatar / mode), and the preset
  * entry's `name` is preserved across the rewrite.
  */
-export async function persistCharacterDirectorEditor(context, settings, avatar, {
-    editor,
-    forceEnabled = null,
-} = {}) {
+export async function persistCharacterDirectorEditor(context, settings, avatar, { editor } = {}) {
     void settings;
     const target = String(avatar || '');
     if (!target) {
@@ -321,12 +287,8 @@ export async function persistCharacterDirectorEditor(context, settings, avatar, 
         return false;
     }
 
-    const sourceEnabled = typeof editor?.enabled === 'boolean' ? editor.enabled : true;
-    const enabledFlag = forceEnabled === null ? Boolean(sourceEnabled) : Boolean(forceEnabled);
-
     const previous = getCharacterExtensionDataByAvatar(context, target);
     const { libraries, activeIds } = clonePreviousLibrariesAndIds(previous);
-    const overrideEnabled = clonePreviousEnabledFlags(previous);
 
     const sanitizedProfile = sanitizeDirectorProfile(editor);
     // Explicitly list the director payload fields so the on-card shape
@@ -341,62 +303,14 @@ export async function persistCharacterDirectorEditor(context, settings, avatar, 
         discardOnAbort: sanitizedProfile.discardOnAbort,
         lorebookFilter: sanitizedProfile.lorebookFilter,
     });
-    overrideEnabled[ORCH_EXECUTION_MODE_DIRECTOR] = enabledFlag;
 
     const nextPayload = {
         ...previous,
         override: nextOverridePin(previous, ORCH_EXECUTION_MODE_DIRECTOR),
         presetLibraries: libraries,
         activePresetIds: activeIds,
-        overrideEnabled,
     };
     return await persistOrchestratorCharacterExtension(context, characterIndex, nextPayload);
-}
-
-/**
- * Flip the per-character "override enabled" flag for one execution mode
- * without disturbing the stored preset payload. The runtime
- * (`getEffectiveProfile`) already falls back to the global profile when
- * `overrideEnabled[mode]` is false, so this single setter lets the
- * panel offer a switch alongside the "configured, currently disabled"
- * status label: the card's preset library is preserved as-is for
- * re-enabling later.
- *
- * Refuses to write when the card has no preset library for the mode, so
- * a stray click on a hidden control cannot synthesize a phantom override.
- */
-async function setCharacterPresetOverrideEnabled(context, avatar, mode, nextEnabled) {
-    const target = String(avatar || '');
-    if (!target) return false;
-    const characterIndex = getCharacterIndexByAvatar(context, target);
-    if (characterIndex < 0) return false;
-    const previous = getCharacterExtensionDataByAvatar(context, target);
-    const lib = previous?.presetLibraries?.[mode];
-    const hasLib = Boolean(lib && typeof lib === 'object' && Object.keys(lib).length > 0);
-    if (!hasLib) return false;
-    const overrideEnabled = clonePreviousEnabledFlags(previous);
-    overrideEnabled[mode] = Boolean(nextEnabled);
-    const nextPayload = {
-        ...previous,
-        overrideEnabled,
-    };
-    return await persistOrchestratorCharacterExtension(context, characterIndex, nextPayload);
-}
-
-export async function setCharacterSpecOverrideEnabled(context, avatar, nextEnabled) {
-    return setCharacterPresetOverrideEnabled(context, avatar, ORCH_EXECUTION_MODE_SPEC, nextEnabled);
-}
-
-export async function setCharacterAgendaOverrideEnabled(context, avatar, nextEnabled) {
-    return setCharacterPresetOverrideEnabled(context, avatar, ORCH_EXECUTION_MODE_AGENDA, nextEnabled);
-}
-
-export async function setCharacterLoopOverrideEnabled(context, avatar, nextEnabled) {
-    return setCharacterPresetOverrideEnabled(context, avatar, ORCH_EXECUTION_MODE_LOOP, nextEnabled);
-}
-
-export async function setCharacterDirectorOverrideEnabled(context, avatar, nextEnabled) {
-    return setCharacterPresetOverrideEnabled(context, avatar, ORCH_EXECUTION_MODE_DIRECTOR, nextEnabled);
 }
 
 export async function persistOrchestratorCharacterExtension(context, characterIndex, modulePayload) {
