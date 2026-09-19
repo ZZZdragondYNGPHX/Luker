@@ -342,6 +342,8 @@ export function loadCharacterDirectorEditorState(context, avatar) {
     const charActiveResult = getActivePreset(settings, ORCH_EXECUTION_MODE_DIRECTOR,
         { scope: 'character', context, avatar: safeAvatar });
     const charActive = (charActiveResult.ok && charActiveResult.state) ? charActiveResult.state : null;
+    // Single-scope model: "enabled" means the card's active slot holds a
+    // real preset id — the card library runs for this mode.
     const overrideEnabled = Boolean(getCharacterActivePresetId(
         context, safeAvatar, ORCH_EXECUTION_MODE_DIRECTOR,
     ));

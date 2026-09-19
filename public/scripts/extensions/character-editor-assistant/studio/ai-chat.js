@@ -449,7 +449,7 @@ function buildTools() {
  type: 'function',
  function: {
  name: TOOL_NAMES.ORCHESTRATOR_GET_OVERRIDE,
- description: 'Read the orchestrator override summary for the active character card. Always character-scoped — never reads global orchestrator settings. Returns `{ mode, enabled }` for the saved execution mode (or null when no per-character preset library exists for that mode). The full per-mode preset payload (spec / agenda / loop / director) is stored in `presetLibraries.<mode>` on the card and is managed through the orchestrator iteration studio rather than this tool.',
+ description: 'Read the orchestrator preset state for the active character card. Always character-scoped — never reads global orchestrator settings. Returns `{ mode, enabled, activePresetId }` for the saved execution mode (or null when the card has no per-character preset library for that mode). `enabled` is true when the card\'s active slot points at a real preset (the card library runs); false means the global active preset runs. The full per-mode preset payload is stored in `presetLibraries.<mode>` on the card and is managed through the orchestrator iteration studio rather than this tool.',
  parameters: { type: 'object', properties: {}, additionalProperties: false },
  },
  },
@@ -457,13 +457,13 @@ function buildTools() {
  type: 'function',
  function: {
  name: TOOL_NAMES.ORCHESTRATOR_SET_OVERRIDE,
- description: 'Toggle the per-character orchestrator override enabled flag for the saved execution mode (overrideEnabled[mode]). The card\'s preset library is preserved either way; only the flag flips. Always character-scoped — global orchestrator settings are never touched. The card must already have a preset library for the saved mode (otherwise there is nothing to enable / disable); populate it through the orchestrator iteration studio first.',
+ description: 'Switch which preset the active character card runs for its saved execution mode. Always character-scoped — global orchestrator settings are never touched. The card must already have a preset library for the saved mode (otherwise there is nothing to switch); populate it through the orchestrator iteration studio first.',
  parameters: {
  type: 'object',
  properties: {
- enabled: { type: 'boolean', description: 'true → apply the card\'s preset library; false → fall back to the global profile while preserving the library for re-enabling later.' },
+ presetId: { type: 'string', description: 'The card preset id to activate, or an empty string to fall back to the global active preset (the card library is preserved either way).' },
  },
- required: ['enabled'],
+ required: ['presetId'],
  additionalProperties: false,
  },
  },
@@ -2173,9 +2173,9 @@ Op-log handles flat scalars. For deeply nested state (quest journal with sub-obj
 
 Two more layers can be tailored *per character card* — both are **always character-scoped writes** through the dedicated tools below; they never touch the user's global orchestrator/memory-graph settings.
 
-### Orchestrator override
+### Orchestrator presets
 
-**What the orchestrator actually does — read this before designing an override.** The orchestrator does **not** replace the main reply generation. Before each user turn, it runs a separate planning pipeline whose only output is a single block of text called the **capsule** (剧情指引 — orchestration guidance). The capsule is then injected as a system-role message into the main reply LLM's prompt at a configured position (\`atDepth\`, \`before\`, \`after\`); the main LLM still does straight-line generation and writes everything the user reads. Stage agents / planner agents / sub-agents inside the orchestrator do **not** write dialogue, do **not** speak in character, and do **not** produce the user-facing reply — their job is to assemble the guidance text. Only the **last stage's** output forms the capsule body; intermediate stage outputs flow as inputs to downstream stages but never reach the prompt directly.
+**What the orchestrator actually does — read this before designing a preset.** The orchestrator does **not** replace the main reply generation. Before each user turn, it runs a separate planning pipeline whose only output is a single block of text called the **capsule** (剧情指引 — orchestration guidance). The capsule is then injected as a system-role message into the main reply LLM's prompt at a configured position (\`atDepth\`, \`before\`, \`after\`); the main LLM still does straight-line generation and writes everything the user reads. Stage agents / planner agents / sub-agents inside the orchestrator do **not** write dialogue, do **not** speak in character, and do **not** produce the user-facing reply — their job is to assemble the guidance text. Only the **last stage's** output forms the capsule body; intermediate stage outputs flow as inputs to downstream stages but never reach the prompt directly.
 
 So when a user says "I want a separate writer agent" or "I want this agent to actually write the reply", that's not what the orchestrator gives them — they're describing a different system. With the orchestrator, every "writer/critic/planner" name is a guidance-author, not a reply-author.
 

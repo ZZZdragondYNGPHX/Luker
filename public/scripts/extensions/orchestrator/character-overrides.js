@@ -290,13 +290,14 @@ function hasLegacyOverridePayload(ext, mode) {
 }
 
 /**
- * Compute the next character-extension payload after a "Clear Character
- * Override" click for the given execution mode. Strips
- * `presetLibraries.<mode>`, `activePresetIds.<mode>`, and the
- * `overrideEnabled.<mode>` flag, dropping empty containers so the
- * `hasCharacter*Override` probe reads false afterwards. Also drops the
- * `override.mode` pin when it was pointing at the cleared mode so the
- * dispatcher does not keep that mode active after the data is gone.
+ * Compute the next character-extension payload after a "Clear presets
+ * from this card" click for the given execution mode. Strips
+ * `presetLibraries.<mode>` and `activePresetIds.<mode>` (plus any
+ * stale `overrideEnabled.<mode>` flag from pre-migration cards),
+ * dropping empty containers so the `hasCharacter*Override` probe reads
+ * false afterwards. Also drops the `override.mode` pin when it was
+ * pointing at the cleared mode so the dispatcher does not keep that
+ * mode active after the data is gone.
  * Pure (no I/O) so it can be unit-tested independent of the click
  * handler — main.js wires this into the persistence + UI reload path.
  */

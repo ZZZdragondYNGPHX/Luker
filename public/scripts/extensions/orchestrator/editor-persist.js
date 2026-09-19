@@ -18,10 +18,9 @@
  *      mode), `persistCharacterAgendaEditor` (agenda mode),
  *      `persistCharacterLoopEditor` (loop mode), and
  *      `persistCharacterDirectorEditor` (director mode). Each writes
- *      into the active slot of the card-scoped `presetLibraries.<mode>`,
- *      records the per-mode `overrideEnabled.<mode>` flag, and pins the
- *      saved execution mode via `override.mode`. All character writes
- *      delegate to `persistOrchestratorCharacterExtension`.
+ *      into the active slot of the card-scoped `presetLibraries.<mode>`
+ *      and pins the saved execution mode via `override.mode`. All
+ *      character writes delegate to `persistOrchestratorCharacterExtension`.
  *
  * `createPortableProfileFromEditor` and
  * `createPortableAgendaProfileFromEditor` turn an editor draft into a
@@ -228,10 +227,9 @@ export async function persistCharacterAgendaEditor(context, settings, avatar, { 
 
 /**
  * Persist a loop-mode editor draft as a character override. Writes into
- * the active slot of `presetLibraries.loop` on the character card,
- * records `overrideEnabled.loop`, pins the saved execution mode, and
- * routes through `persistOrchestratorCharacterExtension` for the
- * network write.
+ * the active slot of `presetLibraries.loop` on the character card, pins
+ * the saved execution mode, and routes through
+ * `persistOrchestratorCharacterExtension` for the network write.
  *
  * The loop payload runs through `sanitizeLoopProfile` so the on-card
  * shape matches the V3 schema regardless of how the editor mutated the
@@ -266,9 +264,8 @@ export async function persistCharacterLoopEditor(context, settings, avatar, { ed
 /**
  * Persist a director-mode editor draft as a character override. Writes
  * into the active slot of `presetLibraries.director` on the character
- * card, records `overrideEnabled.director`, pins the saved execution
- * mode, and routes through `persistOrchestratorCharacterExtension`
- * for the network write.
+ * card, pins the saved execution mode, and routes through
+ * `persistOrchestratorCharacterExtension` for the network write.
  *
  * The director payload runs through `sanitizeDirectorProfile` so the
  * on-card shape matches the canonical schema regardless of how the
