@@ -175,7 +175,7 @@ describe('character-overrides — preset library reads', () => {
         expect(overrides.getCharacterActivePresetId(ctx, 'alice.png', 'loop')).toBe('');
     });
 
-    test('isCharacterPresetActiveOverrideEnabled requires both library entry and overrideEnabled flag', () => {
+    test('overrideEnabled.loop=true migrates to a filled slot (card runs)', () => {
         // Superseded by the single-scope model: the runtime decision is
         // now `getRuntimePresetScope` (active slot non-empty). The legacy
         // flag is consumed once by `migrateCardOverrideEnabledFlags`.

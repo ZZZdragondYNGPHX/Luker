@@ -15,9 +15,6 @@
  * of skill subsystem state.
  */
 
-// Keep the character-aware preset bar enhancement isolated from main.js so
-// the existing CRUD handlers remain the single persistence path.
-import './preset-character-scope-ui.js';
 import { getExecutionMode } from './character-overrides.js';
 import { getDisplayedScope } from './editor-display.js';
 import { getCurrentAvatar } from './snapshot-cache.js';
